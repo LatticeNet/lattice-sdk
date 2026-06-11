@@ -42,6 +42,7 @@ type Node struct {
 	Role         string    `json:"role"`
 	WireGuardIP  string    `json:"wireguard_ip"`
 	PublicIP     string    `json:"public_ip"`
+	PublicIPv6   string    `json:"public_ipv6,omitempty"`
 	AgentVersion string    `json:"agent_version"`
 	Online       bool      `json:"online"`
 	LastSeen     time.Time `json:"last_seen"`
@@ -139,4 +140,41 @@ type Approval struct {
 	ApprovedBy string    `json:"approved_by,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+const (
+	DDNSProviderCloudflare = "cloudflare"
+	DDNSProviderWebhook    = "webhook"
+)
+
+// DDNSProfile describes how a node's public IP should be published to DNS. It is
+// bound to a node; when that node's observed public IP changes, the bound
+// profiles' records are updated.
+type DDNSProfile struct {
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	NodeID     string   `json:"node_id"`
+	Provider   string   `json:"provider"`
+	Domains    []string `json:"domains"`
+	EnableIPv4 bool     `json:"enable_ipv4"`
+	EnableIPv6 bool     `json:"enable_ipv6"`
+	MaxRetries int      `json:"max_retries"`
+	TTL        int      `json:"ttl"`
+
+	// Cloudflare provider
+	CFAPIToken string `json:"cf_api_token,omitempty"`
+
+	// Webhook provider. Body/URL support the templates #ip#, #domain#, #type#.
+	WebhookURL     string `json:"webhook_url,omitempty"`
+	WebhookMethod  string `json:"webhook_method,omitempty"`
+	WebhookBody    string `json:"webhook_body,omitempty"`
+	WebhookHeaders string `json:"webhook_headers,omitempty"`
+
+	// Status (updated by the server after each run).
+	LastIPv4  string    `json:"last_ipv4,omitempty"`
+	LastIPv6  string    `json:"last_ipv6,omitempty"`
+	LastRunAt time.Time `json:"last_run_at,omitempty"`
+	LastError string    `json:"last_error,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }

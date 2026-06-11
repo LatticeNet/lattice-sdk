@@ -35,19 +35,22 @@ type Token struct {
 }
 
 type Node struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	TokenHash    string    `json:"token_hash"`
-	Tags         []string  `json:"tags"`
-	Role         string    `json:"role"`
-	WireGuardIP  string    `json:"wireguard_ip"`
-	PublicIP     string    `json:"public_ip"`
-	PublicIPv6   string    `json:"public_ipv6,omitempty"`
-	AgentVersion string    `json:"agent_version"`
-	Online       bool      `json:"online"`
-	LastSeen     time.Time `json:"last_seen"`
-	Metrics      Metrics   `json:"metrics"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID                 string    `json:"id"`
+	Name               string    `json:"name"`
+	TokenHash          string    `json:"token_hash"`
+	Tags               []string  `json:"tags"`
+	Role               string    `json:"role"`
+	WireGuardIP        string    `json:"wireguard_ip"`
+	WireGuardPublicKey string    `json:"wireguard_public_key,omitempty"`
+	WireGuardEndpoint  string    `json:"wireguard_endpoint,omitempty"`
+	WireGuardPort      int       `json:"wireguard_port,omitempty"`
+	PublicIP           string    `json:"public_ip"`
+	PublicIPv6         string    `json:"public_ipv6,omitempty"`
+	AgentVersion       string    `json:"agent_version"`
+	Online             bool      `json:"online"`
+	LastSeen           time.Time `json:"last_seen"`
+	Metrics            Metrics   `json:"metrics"`
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 type Metrics struct {

@@ -228,3 +228,25 @@ type NotifyChannel struct {
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`
 }
+
+// TunnelIngress maps a public hostname to a node-local service for a Cloudflare
+// Tunnel. Service is a cloudflared service URL, e.g. http://localhost:8088,
+// ssh://localhost:22, or the literal http_status:404.
+type TunnelIngress struct {
+	Hostname string `json:"hostname"`
+	Service  string `json:"service"`
+	Path     string `json:"path,omitempty"`
+}
+
+// TunnelProfile describes a Cloudflare Tunnel deployed on a node. Credentials
+// are node-local (CredentialsFile path); the server only stores the topology.
+type TunnelProfile struct {
+	ID              string          `json:"id"`
+	Name            string          `json:"name"`
+	NodeID          string          `json:"node_id"`
+	TunnelID        string          `json:"tunnel_id"`
+	CredentialsFile string          `json:"credentials_file,omitempty"`
+	Ingress         []TunnelIngress `json:"ingress"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+}

@@ -178,3 +178,37 @@ type DDNSProfile struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+const (
+	MonitorTypeTCP  = "tcp"
+	MonitorTypeHTTP = "http"
+	MonitorTypeICMP = "icmp"
+)
+
+// Monitor is a periodic reachability/latency probe executed by assigned agents.
+// Targets are host:port for tcp/icmp probes and a URL for http probes. A monitor
+// runs on every node when AssignAll is set, otherwise on the nodes in NodeIDs —
+// this is how a group's members continuously measure their group leader.
+type Monitor struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Type        string    `json:"type"`
+	Target      string    `json:"target"`
+	IntervalSec int       `json:"interval_sec"`
+	TimeoutSec  int       `json:"timeout_sec"`
+	AssignAll   bool      `json:"assign_all"`
+	NodeIDs     []string  `json:"node_ids,omitempty"`
+	Enabled     bool      `json:"enabled"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// MonitorResult is a single probe outcome reported by an agent.
+type MonitorResult struct {
+	MonitorID string    `json:"monitor_id"`
+	NodeID    string    `json:"node_id"`
+	At        time.Time `json:"at"`
+	Success   bool      `json:"success"`
+	LatencyMs float64   `json:"latency_ms"`
+	Error     string    `json:"error,omitempty"`
+}

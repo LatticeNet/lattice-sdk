@@ -212,3 +212,16 @@ type MonitorResult struct {
 	LatencyMs float64   `json:"latency_ms"`
 	Error     string    `json:"error,omitempty"`
 }
+
+// NotifyChannel is a persisted notification destination. Config holds
+// provider-specific fields (e.g. token, chat_id, webhook_url); its values are
+// secret and never serialized back to clients.
+type NotifyChannel struct {
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Kind      string            `json:"kind"`
+	Config    map[string]string `json:"config,omitempty"`
+	Enabled   bool              `json:"enabled"`
+	CreatedAt time.Time         `json:"created_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
+}

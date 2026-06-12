@@ -285,3 +285,33 @@ type TunnelProfile struct {
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
 }
+
+// OIDCProvider is an admin-configured external identity provider for SSO login.
+// ClientSecret is a secret-at-rest field (encrypted by the store boundary) and
+// is never returned by the API.
+type OIDCProvider struct {
+	ID             string    `json:"id"`
+	DisplayName    string    `json:"display_name"`
+	Issuer         string    `json:"issuer"`
+	ClientID       string    `json:"client_id"`
+	ClientSecret   string    `json:"client_secret,omitempty"`
+	Scopes         []string  `json:"scopes,omitempty"`
+	AllowedDomains []string  `json:"allowed_domains,omitempty"`
+	Enabled        bool      `json:"enabled"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// OIDCIdentity is the durable link between an external subject and a local user.
+// Keyed in the store by (ProviderID, Subject): the trust anchor is the
+// admin-vetted provider record, not the bare issuer string, so a second
+// provider that happens to share an issuer cannot reuse another provider's
+// links. Subject is the stable identifier; Email/Issuer are reference only.
+type OIDCIdentity struct {
+	ProviderID string    `json:"provider_id"`
+	Issuer     string    `json:"issuer"`
+	Subject    string    `json:"subject"`
+	UserID     string    `json:"user_id"`
+	Email      string    `json:"email,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+}

@@ -1,0 +1,133 @@
+syntax = "proto3";
+
+package lattice.v1;
+
+option go_package = "github.com/LatticeNet/lattice-sdk/gen/lattice/v1;latticev1";
+
+import "lattice/v1/common.proto";
+
+service ControlPlaneService {
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
+  rpc CreateTask(CreateTaskRequest) returns (TaskView);
+  rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
+  rpc ListTaskResults(ListTaskResultsRequest) returns (ListTaskResultsResponse);
+  rpc ListAudit(ListAuditRequest) returns (ListAuditResponse);
+  rpc CreateApproval(CreateApprovalRequest) returns (ApprovalView);
+  rpc Approve(ApproveRequest) returns (ApprovalView);
+}
+
+message ListNodesRequest {
+  PageRequest page = 1;
+}
+
+message ListNodesResponse {
+  repeated NodeView nodes = 1;
+  PageResponse page = 2;
+}
+
+message CreateTaskRequest {
+  repeated string target_node_ids = 1;
+  string profile = 2;
+  // Allowed values: sh, bash, python3, node.
+  string interpreter = 3;
+  // Maximum accepted size: 64 KiB.
+  string script = 4;
+  // Accepted range: 1..600. Omitted/zero uses the server default.
+  uint32 timeout_seconds = 5;
+  // Accepted range: 1..262144. Omitted/zero uses the server default.
+  uint32 output_limit_bytes = 6;
+  string idempotency_key = 7;
+}
+
+message TaskView {
+  string id = 1;
+  string actor_id = 2;
+  string token_id = 3;
+  repeated string target_node_ids = 4;
+  string profile = 5;
+  string interpreter = 6;
+  string script_sha256 = 7;
+  uint32 script_size_bytes = 8;
+  uint32 timeout_seconds = 9;
+  uint32 output_limit_bytes = 10;
+  string status = 11;
+  string leased_by = 12;
+  TimePoint created_at = 13;
+  TimePoint started_at = 14;
+  TimePoint finished_at = 15;
+}
+
+message ListTasksRequest {
+  PageRequest page = 1;
+}
+
+message ListTasksResponse {
+  repeated TaskView tasks = 1;
+  PageResponse page = 2;
+}
+
+message TaskResultView {
+  string task_id = 1;
+  string node_id = 2;
+  int32 exit_code = 3;
+  string stdout_preview = 4;
+  string stderr_preview = 5;
+  string error = 6;
+  TimePoint started_at = 7;
+  TimePoint finished_at = 8;
+}
+
+message ListTaskResultsRequest {
+  string task_id = 1;
+  string node_id = 2;
+  PageRequest page = 3;
+}
+
+message ListTaskResultsResponse {
+  repeated TaskResultView results = 1;
+  PageResponse page = 2;
+}
+
+message ListAuditRequest {
+  string node_id = 1;
+  string actor_id = 2;
+  PageRequest page = 3;
+  string action = 4;
+  string decision = 5;
+  string scope = 6;
+  string correlation_id = 7;
+  string token_id = 8;
+}
+
+message ListAuditResponse {
+  repeated AuditEvent events = 1;
+  PageResponse page = 2;
+}
+
+message CreateApprovalRequest {
+  string node_id = 1;
+  string plugin_id = 2;
+  string action = 3;
+  string plan = 4;
+  string plan_sha256 = 5;
+}
+
+message ApprovalView {
+  string id = 1;
+  string node_id = 2;
+  string plugin_id = 3;
+  string action = 4;
+  string plan = 5;
+  string plan_sha256 = 6;
+  string status = 7;
+  string actor_id = 8;
+  string approved_by = 9;
+  TimePoint created_at = 10;
+  TimePoint updated_at = 11;
+}
+
+message ApproveRequest {
+  string approval_id = 1;
+  bool queue_apply = 2;
+  string idempotency_key = 3;
+}

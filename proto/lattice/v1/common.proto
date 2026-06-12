@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package lattice.v1;
+
+option go_package = "github.com/LatticeNet/lattice-sdk/gen/lattice/v1;latticev1";
+
+message TimePoint {
+  string unix_nano = 1;
+  string rfc3339 = 2;
+}
+
+message Metrics {
+  double cpu_percent = 1;
+  double load1 = 2;
+  uint64 memory_used = 3;
+  uint64 memory_total = 4;
+  uint64 disk_used = 5;
+  uint64 disk_total = 6;
+  uint64 net_rx_bytes = 7;
+  uint64 net_tx_bytes = 8;
+  uint64 uptime_seconds = 9;
+  TimePoint collected_at = 10;
+}
+
+message NodeView {
+  string id = 1;
+  string name = 2;
+  repeated string tags = 3;
+  string role = 4;
+  string wireguard_ip = 5;
+  string wireguard_public_key = 6;
+  string wireguard_endpoint = 7;
+  uint32 wireguard_port = 8;
+  string public_ip = 9;
+  string public_ipv6 = 10;
+  string agent_version = 11;
+  bool online = 12;
+  TimePoint last_seen = 13;
+  Metrics metrics = 14;
+  TimePoint created_at = 15;
+}
+
+message ScopeSet {
+  repeated string scopes = 1;
+  repeated string server_allowlist = 2;
+}
+
+message PageRequest {
+  uint32 page_size = 1;
+  string page_token = 2;
+}
+
+message PageResponse {
+  string next_page_token = 1;
+}
+
+message AuditEvent {
+  string id = 1;
+  TimePoint at = 2;
+  string actor_id = 3;
+  string token_id = 4;
+  string node_id = 5;
+  string action = 6;
+  string scope = 7;
+  string decision = 8;
+  string reason = 9;
+  string correlation_id = 10;
+  map<string, string> metadata = 11;
+}
+
+message ApiError {
+  // Stable machine code. Known values include capability_denied,
+  // invalid_node_token, invalid_task_lease, and task_output_limit_exceeded.
+  string code = 1;
+  // Public, user-facing message. Server-side 5xx details must be redacted.
+  string message = 2;
+  string request_id = 3;
+}

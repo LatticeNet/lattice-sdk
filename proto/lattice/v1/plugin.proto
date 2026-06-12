@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package lattice.v1;
+
+option go_package = "github.com/LatticeNet/lattice-sdk/gen/lattice/v1;latticev1";
+
+enum PluginType {
+  PLUGIN_TYPE_UNSPECIFIED = 0;
+  PLUGIN_TYPE_SYSTEM = 1;
+  PLUGIN_TYPE_WORKER = 2;
+  PLUGIN_TYPE_WASM = 3;
+}
+
+enum CapabilityRisk {
+  CAPABILITY_RISK_UNSPECIFIED = 0;
+  CAPABILITY_RISK_READ = 1;
+  CAPABILITY_RISK_WRITE = 2;
+  CAPABILITY_RISK_HOST = 3;
+}
+
+message PluginCapability {
+  string name = 1;
+  CapabilityRisk risk = 2;
+}
+
+message PluginManifest {
+  string id = 1;
+  string name = 2;
+  PluginType type = 3;
+  repeated PluginCapability capabilities = 4;
+  string version = 5;
+  string entrypoint = 6;
+  // Stable publisher id, e.g. "latticenet" or "example.vendor".
+  string publisher = 7;
+  // Lowercase hex SHA-256 digest of the plugin artifact/package.
+  string digest_sha256 = 8;
+  // Base64 Ed25519 signature over the canonical Lattice signing payload.
+  string signature_ed25519 = 9;
+}
+
+message PluginRequest {
+  string request_id = 1;
+  string plugin_id = 2;
+  string action = 3;
+  bytes payload_json = 4;
+  repeated string granted_capabilities = 5;
+  repeated string server_allowlist = 6;
+}
+
+message PluginResponse {
+  bool ok = 1;
+  string plan = 2;
+  string plan_sha256 = 3;
+  string message = 4;
+  string error = 5;
+  bytes payload_json = 6;
+}

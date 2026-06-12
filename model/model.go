@@ -76,6 +76,7 @@ type Task struct {
 	TimeoutSec  int       `json:"timeout_sec"`
 	OutputLimit int       `json:"output_limit"`
 	Status      string    `json:"status"`
+	LeaseID     string    `json:"lease_id,omitempty"`
 	LeasedBy    string    `json:"leased_by,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	StartedAt   time.Time `json:"started_at,omitempty"`
@@ -84,6 +85,7 @@ type Task struct {
 
 type TaskResult struct {
 	TaskID     string    `json:"task_id"`
+	LeaseID    string    `json:"lease_id,omitempty"`
 	NodeID     string    `json:"node_id"`
 	ExitCode   int       `json:"exit_code"`
 	Stdout     string    `json:"stdout"`
@@ -106,6 +108,36 @@ type AuditEvent struct {
 	CorrelationID string            `json:"correlation_id"`
 	Metadata      map[string]string `json:"metadata,omitempty"`
 }
+
+// APIError is the stable machine-readable error shape shared by server,
+// dashboard, agents and plugins. Messages are user-facing; callers should make
+// authorization and retry decisions from Code.
+type APIError struct {
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	RequestID string `json:"request_id"`
+}
+
+type APIErrorResponse struct {
+	Error APIError `json:"error"`
+}
+
+const (
+	APIErrorBadRequest       = "bad_request"
+	APIErrorUnauthorized     = "unauthorized"
+	APIErrorForbidden        = "forbidden"
+	APIErrorNotFound         = "not_found"
+	APIErrorMethodNotAllowed = "method_not_allowed"
+	APIErrorRateLimited      = "rate_limited"
+	APIErrorBadGateway       = "bad_gateway"
+	APIErrorInternal         = "internal_error"
+	APIErrorRequestFailed    = "request_failed"
+
+	APIErrorCapabilityDenied        = "capability_denied"
+	APIErrorInvalidNodeToken        = "invalid_node_token"
+	APIErrorInvalidTaskLease        = "invalid_task_lease"
+	APIErrorTaskOutputLimitExceeded = "task_output_limit_exceeded"
+)
 
 type KVEntry struct {
 	Bucket    string    `json:"bucket"`

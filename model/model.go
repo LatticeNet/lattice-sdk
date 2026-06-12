@@ -12,6 +12,11 @@ const (
 	ApprovalApproved = "approved"
 	ApprovalRejected = "rejected"
 	ApprovalApplied  = "applied"
+
+	PluginStatusVerified  = "verified"
+	PluginStatusInstalled = "installed"
+	PluginStatusActive    = "active"
+	PluginStatusDisabled  = "disabled"
 )
 
 type User struct {
@@ -165,6 +170,28 @@ type WorkerScript struct {
 	Capabilities []string  `json:"capabilities"`
 	Public       bool      `json:"public"`
 	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// PluginInstallation is the persisted lifecycle record for a verified plugin
+// bundle. It is intentionally metadata-only: artifacts and runtime handles stay
+// outside the shared API model.
+type PluginInstallation struct {
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	Type           string    `json:"type"`
+	Version        string    `json:"version,omitempty"`
+	Entrypoint     string    `json:"entrypoint,omitempty"`
+	Publisher      string    `json:"publisher,omitempty"`
+	Capabilities   []string  `json:"capabilities"`
+	ArtifactSHA256 string    `json:"artifact_sha256,omitempty"`
+	BundlePath     string    `json:"bundle_path,omitempty"`
+	Status         string    `json:"status"`
+	VerifiedAt     time.Time `json:"verified_at,omitempty"`
+	InstalledAt    time.Time `json:"installed_at,omitempty"`
+	ActivatedAt    time.Time `json:"activated_at,omitempty"`
+	DisabledAt     time.Time `json:"disabled_at,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type Approval struct {

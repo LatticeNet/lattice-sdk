@@ -50,6 +50,7 @@ type Node struct {
 	PublicIPv6         string    `json:"public_ipv6,omitempty"`
 	AgentVersion       string    `json:"agent_version"`
 	Online             bool      `json:"online"`
+	Disabled           bool      `json:"disabled,omitempty"`
 	LastSeen           time.Time `json:"last_seen"`
 	Metrics            Metrics   `json:"metrics"`
 	CreatedAt          time.Time `json:"created_at"`

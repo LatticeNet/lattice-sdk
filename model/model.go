@@ -15,12 +15,14 @@ const (
 )
 
 type User struct {
-	ID           string    `json:"id"`
-	Username     string    `json:"username"`
-	PasswordHash string    `json:"password_hash"`
-	Scopes       []string  `json:"scopes"`
-	TOTPEnabled  bool      `json:"totp_enabled"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID                 string    `json:"id"`
+	Username           string    `json:"username"`
+	PasswordHash       string    `json:"password_hash"`
+	Scopes             []string  `json:"scopes"`
+	TOTPEnabled        bool      `json:"totp_enabled"`
+	TOTPSecret         string    `json:"totp_secret,omitempty"`
+	RecoveryCodeHashes []string  `json:"recovery_code_hashes,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 type Token struct {

@@ -142,6 +142,26 @@ type MachineProfile struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// NFTInputs are the authoritative, server-owned baseline nftables inputs for a
+// single node. Other core providers (DNS, per-node ACL, proxy cores) compose
+// their required ports/rules into this shape before rendering the one
+// lattice_guard table; they must not create competing nft tables.
+type NFTInputs struct {
+	ID     string `json:"id"`
+	NodeID string `json:"node_id"`
+
+	InterfaceName string `json:"interface_name,omitempty"`
+	WireGuardCIDR string `json:"wireguard_cidr,omitempty"`
+
+	PublicTCP    []int `json:"public_tcp,omitempty"`
+	PublicUDP    []int `json:"public_udp,omitempty"`
+	WireGuardTCP []int `json:"wireguard_tcp,omitempty"`
+	WireGuardUDP []int `json:"wireguard_udp,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type Task struct {
 	ID          string    `json:"id"`
 	ActorID     string    `json:"actor_id"`

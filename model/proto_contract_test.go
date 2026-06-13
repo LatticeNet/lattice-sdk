@@ -75,6 +75,7 @@ func TestProtoContractsExistAndStayRedacted(t *testing.T) {
 	for _, msg := range []string{
 		"message NodeView",
 		"message MachineView",
+		"message NFTInputsView",
 		"message AgentEnvelope",
 		"message PluginManifest",
 		"enum CapabilityRisk",

@@ -81,6 +81,19 @@ message MachineView {
   TimePoint updated_at = 21;
 }
 
+message NFTInputsView {
+  string id = 1;
+  string node_id = 2;
+  string node_name = 3;
+  string interface_name = 4;
+  string wireguard_cidr = 5;
+  repeated int32 public_tcp = 6;
+  repeated int32 public_udp = 7;
+  repeated int32 wireguard_tcp = 8;
+  repeated int32 wireguard_udp = 9;
+  TimePoint updated_at = 10;
+}
+
 message ScopeSet {
   repeated string scopes = 1;
   repeated string server_allowlist = 2;

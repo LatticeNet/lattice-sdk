@@ -20,14 +20,23 @@ const (
 )
 
 type User struct {
-	ID                 string    `json:"id"`
-	Username           string    `json:"username"`
-	PasswordHash       string    `json:"password_hash"`
-	Scopes             []string  `json:"scopes"`
-	TOTPEnabled        bool      `json:"totp_enabled"`
-	TOTPSecret         string    `json:"totp_secret,omitempty"`
-	RecoveryCodeHashes []string  `json:"recovery_code_hashes,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
+	ID                 string   `json:"id"`
+	Username           string   `json:"username"`
+	PasswordHash       string   `json:"password_hash"`
+	Scopes             []string `json:"scopes"`
+	TOTPEnabled        bool     `json:"totp_enabled"`
+	TOTPSecret         string   `json:"totp_secret,omitempty"`
+	RecoveryCodeHashes []string `json:"recovery_code_hashes,omitempty"`
+	// LastTOTPStep is the highest RFC-6238 counter accepted for this user. A
+	// successful verification must present a strictly greater step, which makes
+	// each code single-use and prevents replay within the validity window.
+	LastTOTPStep uint64 `json:"last_totp_step,omitempty"`
+	// SecurityEpoch is bumped on password change, 2FA disable, or admin revoke.
+	// Sessions carry the epoch at which they were minted; a session whose epoch
+	// is older than the user's current epoch is rejected, so privilege-reducing
+	// events invalidate all existing sessions.
+	SecurityEpoch uint64    `json:"security_epoch,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 type Token struct {

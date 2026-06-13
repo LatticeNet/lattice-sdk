@@ -40,12 +40,14 @@ message AgentNetworkReport {
 message AgentHelloRequest {
   AgentEnvelope envelope = 1;
   AgentNetworkReport network = 2;
+  HostFacts host_facts = 3;
 }
 
 message ReportMetricsRequest {
   AgentEnvelope envelope = 1;
   Metrics metrics = 2;
   AgentNetworkReport network = 3;
+  HostFacts host_facts = 4;
 }
 
 message LeaseTasksRequest {

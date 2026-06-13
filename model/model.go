@@ -67,6 +67,7 @@ type Node struct {
 	Disabled           bool      `json:"disabled,omitempty"`
 	LastSeen           time.Time `json:"last_seen"`
 	Metrics            Metrics   `json:"metrics"`
+	HostFacts          HostFacts `json:"host_facts"`
 	CreatedAt          time.Time `json:"created_at"`
 }
 
@@ -81,6 +82,25 @@ type Metrics struct {
 	NetTxBytes    uint64    `json:"net_tx_bytes"`
 	UptimeSeconds uint64    `json:"uptime_seconds"`
 	CollectedAt   time.Time `json:"collected_at"`
+}
+
+// HostFacts are auto-detected, slow-changing machine facts reported by the
+// node-agent. They are advisory low-trust telemetry: useful for display,
+// inventory and map planning, but never for authorization decisions.
+type HostFacts struct {
+	Hostname        string    `json:"hostname,omitempty"`
+	OS              string    `json:"os,omitempty"`
+	Platform        string    `json:"platform,omitempty"`
+	PlatformVersion string    `json:"platform_version,omitempty"`
+	KernelVersion   string    `json:"kernel_version,omitempty"`
+	Arch            string    `json:"arch,omitempty"`
+	CPUCores        int       `json:"cpu_cores,omitempty"`
+	CPUModel        string    `json:"cpu_model,omitempty"`
+	MemoryTotal     uint64    `json:"memory_total,omitempty"`
+	SwapTotal       uint64    `json:"swap_total,omitempty"`
+	Virtualization  string    `json:"virtualization,omitempty"`
+	BootTime        time.Time `json:"boot_time,omitempty"`
+	ReportedAt      time.Time `json:"reported_at,omitempty"`
 }
 
 type Task struct {

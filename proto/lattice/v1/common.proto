@@ -22,6 +22,22 @@ message Metrics {
   TimePoint collected_at = 10;
 }
 
+message HostFacts {
+  string hostname = 1;
+  string os = 2;
+  string platform = 3;
+  string platform_version = 4;
+  string kernel_version = 5;
+  string arch = 6;
+  uint32 cpu_cores = 7;
+  string cpu_model = 8;
+  uint64 memory_total = 9;
+  uint64 swap_total = 10;
+  string virtualization = 11;
+  TimePoint boot_time = 12;
+  TimePoint reported_at = 13;
+}
+
 message NodeView {
   string id = 1;
   string name = 2;
@@ -38,6 +54,7 @@ message NodeView {
   TimePoint last_seen = 13;
   Metrics metrics = 14;
   TimePoint created_at = 15;
+  HostFacts host_facts = 16;
 }
 
 message ScopeSet {

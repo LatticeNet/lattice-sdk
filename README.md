@@ -14,14 +14,14 @@ github.com/LatticeNet/lattice-sdk
 
 ## Packages
 
-- `model` - users, tokens, nodes, metrics, tasks, task results, audit events,
+- `model` - users, tokens, nodes, metrics, HostFacts, tasks, task results, audit events,
   KV entries, static objects, Worker scripts, and approvals.
 
 ## Proto Contracts
 
 `proto/lattice/v1` is the source of truth for the next API boundary:
 
-- `common.proto` - redacted views, metrics, paging, audit metadata.
+- `common.proto` - redacted views, metrics, HostFacts, paging, audit metadata.
 - `control_plane.proto` - dashboard/operator APIs.
 - `agent.proto` - node-agent polling, reporting, task leasing, monitor reporting.
 - `plugin.proto` - plugin manifests, capability risk, publisher identity,

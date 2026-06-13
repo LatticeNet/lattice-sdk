@@ -57,6 +57,30 @@ message NodeView {
   HostFacts host_facts = 16;
 }
 
+message MachineView {
+  string id = 1;
+  string node_id = 2;
+  string node_name = 3;
+  string label = 4;
+  bool online = 5;
+  HostFacts host_facts = 6;
+  string vendor = 7;
+  string region = 8;
+  bool has_console_url = 9;
+  bool has_detail_url = 10;
+  string notes = 11;
+  int64 price_cents = 12;
+  string currency = 13;
+  string renewal_cycle = 14;
+  uint32 cycle_days = 15;
+  TimePoint next_renewal = 16;
+  int32 days_until_renewal = 17;
+  bool auto_roll = 18;
+  repeated int32 remind_days_before = 19;
+  bool reminders_enabled = 20;
+  TimePoint updated_at = 21;
+}
+
 message ScopeSet {
   repeated string scopes = 1;
   repeated string server_allowlist = 2;

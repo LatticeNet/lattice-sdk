@@ -103,6 +103,45 @@ type HostFacts struct {
 	ReportedAt      time.Time `json:"reported_at,omitempty"`
 }
 
+const (
+	RenewalCycleMonthly    = "monthly"
+	RenewalCycleQuarterly  = "quarterly"
+	RenewalCycleSemiannual = "semiannual"
+	RenewalCycleAnnual     = "annual"
+	RenewalCycleCustomDays = "custom_days"
+)
+
+// MachineProfile is operator-authored inventory, cost, and renewal metadata for
+// a node. It is server-only control-plane state: it must never be sent to an
+// agent or used by an agent. ConsoleURL and DetailURL may carry account-specific
+// or signed links and are encrypted at rest by lattice-server.
+type MachineProfile struct {
+	ID     string `json:"id"`
+	NodeID string `json:"node_id"`
+	Label  string `json:"label,omitempty"`
+
+	Vendor     string `json:"vendor,omitempty"`
+	ConsoleURL string `json:"console_url,omitempty"`
+	DetailURL  string `json:"detail_url,omitempty"`
+	Region     string `json:"region,omitempty"`
+	Notes      string `json:"notes,omitempty"`
+
+	PriceCents int64  `json:"price_cents,omitempty"`
+	Currency   string `json:"currency,omitempty"`
+
+	RenewalCycle string    `json:"renewal_cycle,omitempty"`
+	CycleDays    int       `json:"cycle_days,omitempty"`
+	NextRenewal  time.Time `json:"next_renewal,omitempty"`
+	AutoRoll     bool      `json:"auto_roll"`
+
+	RemindDaysBefore []int  `json:"remind_days_before,omitempty"`
+	RemindersEnabled bool   `json:"reminders_enabled"`
+	LastRemindedKey  string `json:"last_reminded_key,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type Task struct {
 	ID          string    `json:"id"`
 	ActorID     string    `json:"actor_id"`

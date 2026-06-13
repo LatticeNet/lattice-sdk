@@ -26,8 +26,8 @@ func TestProtoContractsExistAndStayRedacted(t *testing.T) {
 				t.Fatalf("%s missing %q", name, needle)
 			}
 		}
-		for _, forbidden := range []string{"token_hash", "password_hash", "cf_api_token", "webhook_headers"} {
-			if strings.Contains(text, forbidden) {
+		for _, forbidden := range []string{"token_hash", "password_hash", "cf_api_token", "webhook_headers", "console_url", "detail_url"} {
+			if strings.Contains(text, " "+forbidden+" =") {
 				t.Fatalf("%s exposes forbidden secret field %q", name, forbidden)
 			}
 		}
@@ -74,6 +74,7 @@ func TestProtoContractsExistAndStayRedacted(t *testing.T) {
 	}
 	for _, msg := range []string{
 		"message NodeView",
+		"message MachineView",
 		"message AgentEnvelope",
 		"message PluginManifest",
 		"enum CapabilityRisk",

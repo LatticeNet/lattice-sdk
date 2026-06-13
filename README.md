@@ -14,14 +14,16 @@ github.com/LatticeNet/lattice-sdk
 
 ## Packages
 
-- `model` - users, tokens, nodes, metrics, HostFacts, tasks, task results, audit events,
-  KV entries, static objects, Worker scripts, and approvals.
+- `model` - users, tokens, nodes, metrics, HostFacts, MachineProfile inventory
+  metadata, tasks, task results, audit events, KV entries, static objects,
+  Worker scripts, and approvals.
 
 ## Proto Contracts
 
 `proto/lattice/v1` is the source of truth for the next API boundary:
 
-- `common.proto` - redacted views, metrics, HostFacts, paging, audit metadata.
+- `common.proto` - redacted views, metrics, HostFacts, MachineView, paging,
+  audit metadata.
 - `control_plane.proto` - dashboard/operator APIs.
 - `agent.proto` - node-agent polling, reporting, task leasing, monitor reporting.
 - `plugin.proto` - plugin manifests, capability risk, publisher identity,
@@ -60,8 +62,9 @@ still serves JSON, but new API work should first update the proto contract and
 then generate Go/TypeScript bindings in a later Buf/protoc step.
 
 The contract test rejects secret storage fields such as token/password hashes,
-provider credentials, full task script bodies in control-plane responses, and
-control-plane metadata in agent leased-task payloads.
+provider credentials, MachineProfile console/detail links, full task script
+bodies in control-plane responses, and control-plane metadata in agent
+leased-task payloads.
 
 ## Development
 

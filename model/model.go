@@ -68,6 +68,7 @@ type Node struct {
 	LastSeen           time.Time `json:"last_seen"`
 	Metrics            Metrics   `json:"metrics"`
 	HostFacts          HostFacts `json:"host_facts"`
+	Geo                *NodeGeo  `json:"geo,omitempty"`
 	CreatedAt          time.Time `json:"created_at"`
 }
 
@@ -160,6 +161,71 @@ type NFTInputs struct {
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+const (
+	NetRuleAllow = "allow"
+	NetRuleDeny  = "deny"
+
+	NetDirEgress  = "egress"
+	NetDirIngress = "ingress"
+
+	NetProtoTCP = "tcp"
+	NetProtoUDP = "udp"
+	NetProtoAny = "any"
+
+	NetRefNode = "node"
+	NetRefCIDR = "cidr"
+	NetRefAny  = "any"
+)
+
+// NetEndpoint describes the non-target side of a policy rule. Node refs are
+// resolved by the server at validation/graph/compile time.
+type NetEndpoint struct {
+	Kind   string `json:"kind"`
+	NodeID string `json:"node_id,omitempty"`
+	CIDR   string `json:"cidr,omitempty"`
+}
+
+// NetRule is an ordered operator-authored L3/L4 policy rule evaluated on the
+// target node. Empty Ports means all ports for the selected protocol.
+type NetRule struct {
+	ID        string      `json:"id"`
+	Comment   string      `json:"comment,omitempty"`
+	Action    string      `json:"action"`
+	Direction string      `json:"direction"`
+	Protocol  string      `json:"protocol"`
+	Ports     []int       `json:"ports,omitempty"`
+	Remote    NetEndpoint `json:"remote"`
+	Disabled  bool        `json:"disabled,omitempty"`
+}
+
+// NetPolicy is the per-node network intent document. It is control-plane state
+// only: the agent does not receive it directly. A later iteration compiles this
+// policy into nft with dead-man rollback.
+type NetPolicy struct {
+	ID            string    `json:"id"`
+	TargetNodeID  string    `json:"target_node_id"`
+	Rules         []NetRule `json:"rules"`
+	Enabled       bool      `json:"enabled"`
+	LastPlanSHA   string    `json:"last_plan_sha,omitempty"`
+	LastAppliedAt time.Time `json:"last_applied_at,omitempty"`
+	LastError     string    `json:"last_error,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// NodeGeo is operator-supplied map metadata for a node. Agent-reported geo, if
+// ever accepted, is low-trust and must not overwrite operator-entered values.
+type NodeGeo struct {
+	Country   string    `json:"country,omitempty"`
+	City      string    `json:"city,omitempty"`
+	Lat       float64   `json:"lat,omitempty"`
+	Lon       float64   `json:"lon,omitempty"`
+	ASN       int       `json:"asn,omitempty"`
+	ASOrg     string    `json:"as_org,omitempty"`
+	Provider  string    `json:"provider,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
 
 type Task struct {

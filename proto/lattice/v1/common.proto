@@ -38,6 +38,17 @@ message HostFacts {
   TimePoint reported_at = 13;
 }
 
+message NodeGeo {
+  string country = 1;
+  string city = 2;
+  double lat = 3;
+  double lon = 4;
+  uint32 asn = 5;
+  string as_org = 6;
+  string provider = 7;
+  TimePoint updated_at = 8;
+}
+
 message NodeView {
   string id = 1;
   string name = 2;
@@ -55,6 +66,7 @@ message NodeView {
   Metrics metrics = 14;
   TimePoint created_at = 15;
   HostFacts host_facts = 16;
+  NodeGeo geo = 17;
 }
 
 message MachineView {
@@ -92,6 +104,65 @@ message NFTInputsView {
   repeated int32 wireguard_tcp = 8;
   repeated int32 wireguard_udp = 9;
   TimePoint updated_at = 10;
+}
+
+message NetEndpoint {
+  string kind = 1;
+  string node_id = 2;
+  string cidr = 3;
+}
+
+message NetRule {
+  string id = 1;
+  string comment = 2;
+  string action = 3;
+  string direction = 4;
+  string protocol = 5;
+  repeated int32 ports = 6;
+  NetEndpoint remote = 7;
+  bool disabled = 8;
+}
+
+message NetPolicyView {
+  string id = 1;
+  string target_node_id = 2;
+  string target_node_name = 3;
+  repeated NetRule rules = 4;
+  bool enabled = 5;
+  string last_plan_sha = 6;
+  TimePoint last_applied_at = 7;
+  string last_error = 8;
+  TimePoint updated_at = 9;
+}
+
+message NetPolicyGraph {
+  message Node {
+    string id = 1;
+    string name = 2;
+    bool online = 3;
+    NodeGeo geo = 4;
+  }
+  message Edge {
+    string from = 1;
+    string to = 2;
+    string action = 3;
+    string protocol = 4;
+    repeated int32 ports = 5;
+    string direction = 6;
+    string rule_id = 7;
+  }
+  message External {
+    string target_node_id = 1;
+    string action = 2;
+    string remote = 3;
+    string protocol = 4;
+    repeated int32 ports = 5;
+    string direction = 6;
+    string rule_id = 7;
+  }
+  repeated Node nodes = 1;
+  repeated Edge edges = 2;
+  repeated External externals = 3;
 }
 
 message ScopeSet {

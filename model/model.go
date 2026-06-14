@@ -289,6 +289,120 @@ type NetPolicy struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
+const (
+	ProxyCoreSingbox = "sing-box"
+	ProxyCoreXray    = "xray"
+
+	ProxyProtocolVLESS       = "vless"
+	ProxyProtocolVMess       = "vmess"
+	ProxyProtocolTrojan      = "trojan"
+	ProxyProtocolShadowsocks = "shadowsocks"
+	ProxyProtocolHysteria2   = "hysteria2"
+
+	ProxyTransportTCP   = "tcp"
+	ProxyTransportWS    = "ws"
+	ProxyTransportGRPC  = "grpc"
+	ProxyTransportHTTP2 = "http2"
+	ProxyTransportQUIC  = "quic"
+
+	ProxySecurityNone    = "none"
+	ProxySecurityTLS     = "tls"
+	ProxySecurityReality = "reality"
+
+	ProxyUserStatusActive    = "active"
+	ProxyUserStatusExpired   = "expired"
+	ProxyUserStatusOverQuota = "over_quota"
+	ProxyUserStatusDisabled  = "disabled"
+)
+
+// ProxyInbound is the central protocol/transport template that the server
+// renders into node-local sing-box/xray config. RealityPrivateKey is a
+// server-side secret and must never appear in API views or agent payloads.
+type ProxyInbound struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Core     string `json:"core"`
+	Protocol string `json:"protocol"`
+	Listen   string `json:"listen,omitempty"`
+	Port     int    `json:"port"`
+
+	Transport string `json:"transport,omitempty"`
+	Path      string `json:"path,omitempty"`
+	Host      string `json:"host,omitempty"`
+
+	Security    string   `json:"security,omitempty"`
+	SNI         string   `json:"sni,omitempty"`
+	ALPN        []string `json:"alpn,omitempty"`
+	Fingerprint string   `json:"fingerprint,omitempty"`
+
+	CertPath string `json:"cert_path,omitempty"`
+	KeyPath  string `json:"key_path,omitempty"`
+
+	RealityPrivateKey string   `json:"reality_private_key,omitempty"`
+	RealityPublicKey  string   `json:"reality_public_key,omitempty"`
+	RealityShortIDs   []string `json:"reality_short_ids,omitempty"`
+	RealityDest       string   `json:"reality_dest,omitempty"`
+
+	SSMethod string `json:"ss_method,omitempty"`
+
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// ProxyUser is a central subscriber identity. UUID, Password and SubToken are
+// bearer credential material; they are encrypted at rest and only surfaced
+// through one-time/admin rotation flows, never through list/read views.
+type ProxyUser struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
+
+	UUID     string `json:"uuid,omitempty"`
+	Password string `json:"password,omitempty"`
+	SubToken string `json:"sub_token,omitempty"`
+
+	InboundIDs        []string  `json:"inbound_ids,omitempty"`
+	TrafficLimitBytes int64     `json:"traffic_limit_bytes,omitempty"`
+	ExpiresAt         time.Time `json:"expires_at,omitempty"`
+
+	UsedBytes  int64     `json:"used_bytes"`
+	LastSeenAt time.Time `json:"last_seen_at,omitempty"`
+	Status     string    `json:"status"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// ProxyNodeProfile binds the central proxy model to a single node. One profile
+// exists per node; it is the unit rendered into a reviewed plan/apply task.
+type ProxyNodeProfile struct {
+	ID         string   `json:"id"`
+	NodeID     string   `json:"node_id"`
+	Core       string   `json:"core"`
+	InboundIDs []string `json:"inbound_ids"`
+	Hostname   string   `json:"hostname,omitempty"`
+	ListenIP   string   `json:"listen_ip,omitempty"`
+
+	ConfigPath string `json:"config_path,omitempty"`
+	StatsAPI   string `json:"stats_api,omitempty"`
+
+	AppliedSHA256 string    `json:"applied_sha256,omitempty"`
+	LastApplyAt   time.Time `json:"last_apply_at,omitempty"`
+	LastError     string    `json:"last_error,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// ProxyUsageSnapshot is the last node-reported accounting snapshot. The server
+// later diffs successive snapshots to advance ProxyUser.UsedBytes monotonically.
+type ProxyUsageSnapshot struct {
+	NodeID        string           `json:"node_id"`
+	At            time.Time        `json:"at"`
+	CoreUptimeSec uint64           `json:"core_uptime_sec"`
+	UserBytes     map[string]int64 `json:"user_bytes"`
+}
+
 // NodeGeo is operator-supplied map metadata for a node. Agent-reported geo, if
 // ever accepted, is low-trust and must not overwrite operator-entered values.
 type NodeGeo struct {

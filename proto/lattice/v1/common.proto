@@ -210,6 +210,73 @@ message NetPolicyGraph {
   repeated External externals = 3;
 }
 
+message ProxyInboundView {
+  string id = 1;
+  string name = 2;
+  string core = 3;
+  string protocol = 4;
+  string listen = 5;
+  uint32 port = 6;
+  string transport = 7;
+  string path = 8;
+  string host = 9;
+  string security = 10;
+  string sni = 11;
+  repeated string alpn = 12;
+  string fingerprint = 13;
+  string cert_path = 14;
+  string key_path = 15;
+  bool has_reality_private_key = 16;
+  string reality_public_key = 17;
+  repeated string reality_short_ids = 18;
+  string reality_dest = 19;
+  string ss_method = 20;
+  bool enabled = 21;
+  TimePoint created_at = 22;
+  TimePoint updated_at = 23;
+}
+
+message ProxyUserView {
+  string id = 1;
+  string name = 2;
+  bool enabled = 3;
+  bool has_uuid = 4;
+  bool has_password = 5;
+  bool has_sub_token = 6;
+  repeated string inbound_ids = 7;
+  int64 traffic_limit_bytes = 8;
+  TimePoint expires_at = 9;
+  int64 used_bytes = 10;
+  TimePoint last_seen_at = 11;
+  string status = 12;
+  TimePoint created_at = 13;
+  TimePoint updated_at = 14;
+}
+
+message ProxyNodeProfileView {
+  string id = 1;
+  string node_id = 2;
+  string node_name = 3;
+  string core = 4;
+  repeated string inbound_ids = 5;
+  string hostname = 6;
+  string listen_ip = 7;
+  string config_path = 8;
+  string stats_api = 9;
+  string applied_sha256 = 10;
+  TimePoint last_apply_at = 11;
+  string last_error = 12;
+  TimePoint created_at = 13;
+  TimePoint updated_at = 14;
+}
+
+message ProxyUsageSnapshot {
+  string node_id = 1;
+  TimePoint at = 2;
+  uint64 core_uptime_sec = 3;
+  map<string, int64> user_bytes = 4;
+}
+
 message ScopeSet {
   repeated string scopes = 1;
   repeated string server_allowlist = 2;

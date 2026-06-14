@@ -79,6 +79,10 @@ func TestProtoContractsExistAndStayRedacted(t *testing.T) {
 		"message DNSDeploymentView",
 		"message NetPolicyView",
 		"message NetPolicyGraph",
+		"message ProxyInboundView",
+		"message ProxyUserView",
+		"message ProxyNodeProfileView",
+		"message ProxyUsageSnapshot",
 		"message NodeGeo",
 		"message AgentEnvelope",
 		"message PluginManifest",
@@ -137,6 +141,54 @@ func TestProtoContractsExistAndStayRedacted(t *testing.T) {
 	} {
 		if !strings.Contains(dnsDeployment, field) {
 			t.Fatalf("DNSDeploymentView missing field %s", field)
+		}
+	}
+	proxyInbound := messageBody(t, string(common), "ProxyInboundView")
+	for _, forbidden := range []string{" string reality_private_key "} {
+		if strings.Contains(proxyInbound, forbidden) {
+			t.Fatalf("ProxyInboundView exposes forbidden secret field %q", forbidden)
+		}
+	}
+	for _, field := range []string{
+		"string core = 3;",
+		"string protocol = 4;",
+		"uint32 port = 6;",
+		"string security = 10;",
+		"bool has_reality_private_key = 16;",
+		"string reality_public_key = 17;",
+		"bool enabled = 21;",
+	} {
+		if !strings.Contains(proxyInbound, field) {
+			t.Fatalf("ProxyInboundView missing field %s", field)
+		}
+	}
+	proxyUser := messageBody(t, string(common), "ProxyUserView")
+	for _, forbidden := range []string{" string uuid ", " string password ", " string sub_token "} {
+		if strings.Contains(proxyUser, forbidden) {
+			t.Fatalf("ProxyUserView exposes forbidden secret field %q", forbidden)
+		}
+	}
+	for _, field := range []string{
+		"bool has_uuid = 4;",
+		"bool has_password = 5;",
+		"bool has_sub_token = 6;",
+		"repeated string inbound_ids = 7;",
+		"int64 traffic_limit_bytes = 8;",
+		"string status = 12;",
+	} {
+		if !strings.Contains(proxyUser, field) {
+			t.Fatalf("ProxyUserView missing field %s", field)
+		}
+	}
+	proxyProfile := messageBody(t, string(common), "ProxyNodeProfileView")
+	for _, field := range []string{
+		"string node_id = 2;",
+		"string node_name = 3;",
+		"repeated string inbound_ids = 5;",
+		"string applied_sha256 = 10;",
+	} {
+		if !strings.Contains(proxyProfile, field) {
+			t.Fatalf("ProxyNodeProfileView missing field %s", field)
 		}
 	}
 }

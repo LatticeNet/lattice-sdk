@@ -15,8 +15,9 @@ github.com/LatticeNet/lattice-sdk
 ## Packages
 
 - `model` - users, tokens, nodes, metrics, HostFacts, MachineProfile inventory
-  metadata, NFTInputs, NetPolicy/NodeGeo intent state, approval-linked tasks,
-  task results, audit events, KV entries, static objects, Worker scripts, and
+  metadata, NFTInputs, NetPolicy/NodeGeo intent state, proxy-core
+  inbound/user/node-profile/usage intent state, approval-linked tasks, task
+  results, audit events, KV entries, static objects, Worker scripts, and
   approvals.
 
 ## Proto Contracts
@@ -24,8 +25,9 @@ github.com/LatticeNet/lattice-sdk
 `proto/lattice/v1` is the source of truth for the next API boundary:
 
 - `common.proto` - redacted views, metrics, HostFacts, MachineView,
-  NFTInputsView, DNSDeploymentView, NetPolicyView, NetPolicyGraph, paging,
-  audit metadata.
+  NFTInputsView, DNSDeploymentView, NetPolicyView, NetPolicyGraph,
+  ProxyInboundView, ProxyUserView, ProxyNodeProfileView, ProxyUsageSnapshot,
+  paging, audit metadata.
 - `control_plane.proto` - dashboard/operator APIs.
 - `agent.proto` - node-agent polling, reporting, task leasing, monitor reporting.
 - `plugin.proto` - plugin manifests, capability risk, publisher identity,
@@ -58,6 +60,12 @@ messages.
 (`last_applied_at` / `last_error`) from Cloudflare hostname publication status
 (`last_published_at` / `last_publish_error`). Clients must not overload service
 status fields to infer DDNS publication health.
+
+Proxy-core contracts are also deliberately redacted. `ProxyInboundView` exposes
+only `has_reality_private_key`; `ProxyUserView` exposes only `has_uuid`,
+`has_password`, and `has_sub_token`. Clients must never require raw
+Reality/private user credentials from list/read APIs; one-time create/rotate
+responses should be modeled explicitly when those APIs land.
 
 Plugin integrity is also part of the contract. High-risk system plugins should
 publish `publisher`, `digest_sha256`, and `signature_ed25519`; loaders verify

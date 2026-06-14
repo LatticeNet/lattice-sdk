@@ -24,7 +24,8 @@ github.com/LatticeNet/lattice-sdk
 `proto/lattice/v1` is the source of truth for the next API boundary:
 
 - `common.proto` - redacted views, metrics, HostFacts, MachineView,
-  NFTInputsView, NetPolicyView, NetPolicyGraph, paging, audit metadata.
+  NFTInputsView, DNSDeploymentView, NetPolicyView, NetPolicyGraph, paging,
+  audit metadata.
 - `control_plane.proto` - dashboard/operator APIs.
 - `agent.proto` - node-agent polling, reporting, task leasing, monitor reporting.
 - `plugin.proto` - plugin manifests, capability risk, publisher identity,

@@ -76,6 +76,7 @@ func TestProtoContractsExistAndStayRedacted(t *testing.T) {
 		"message NodeView",
 		"message MachineView",
 		"message NFTInputsView",
+		"message DNSDeploymentView",
 		"message NetPolicyView",
 		"message NetPolicyGraph",
 		"message NodeGeo",
@@ -116,6 +117,24 @@ func TestProtoContractsExistAndStayRedacted(t *testing.T) {
 	for _, field := range []string{"string kind = 1;", "string node_id = 2;", "string cidr = 3;", "string domain = 4;"} {
 		if !strings.Contains(netEndpoint, field) {
 			t.Fatalf("NetEndpoint missing field %s", field)
+		}
+	}
+	dnsDeployment := messageBody(t, string(common), "DNSDeploymentView")
+	for _, forbidden := range []string{"cf_api_token"} {
+		if strings.Contains(dnsDeployment, forbidden) {
+			t.Fatalf("DNSDeploymentView exposes forbidden secret field %q", forbidden)
+		}
+	}
+	for _, field := range []string{
+		"string node_id = 3;",
+		"repeated DNSZone zones = 10;",
+		"bool has_credential = 16;",
+		"string status = 17;",
+		"TimePoint created_at = 24;",
+		"TimePoint updated_at = 25;",
+	} {
+		if !strings.Contains(dnsDeployment, field) {
+			t.Fatalf("DNSDeploymentView missing field %s", field)
 		}
 	}
 }

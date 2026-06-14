@@ -106,6 +106,48 @@ message NFTInputsView {
   TimePoint updated_at = 10;
 }
 
+message DNSRecord {
+  string name = 1;
+  string type = 2;
+  string value = 3;
+  uint32 ttl = 4;
+}
+
+message DNSZone {
+  string suffix = 1;
+  string mode = 2;
+  repeated string upstreams = 3;
+  repeated DNSRecord records = 4;
+}
+
+message DNSDeploymentView {
+  string id = 1;
+  string name = 2;
+  string node_id = 3;
+  string node_name = 4;
+  string engine = 5;
+  uint32 listen_port = 6;
+  bool enable_udp = 7;
+  bool enable_tcp = 8;
+  string exposure = 9;
+  repeated DNSZone zones = 10;
+  string hostname = 11;
+  bool publish_ipv4 = 12;
+  bool publish_ipv6 = 13;
+  uint32 record_ttl = 14;
+  string ddns_profile_id = 15;
+  bool has_credential = 16;
+  string status = 17;
+  string engine_version = 18;
+  string last_ipv4 = 19;
+  string last_ipv6 = 20;
+  TimePoint last_applied_at = 21;
+  string last_error = 22;
+  bool disabled = 23;
+  TimePoint created_at = 24;
+  TimePoint updated_at = 25;
+}
+
 message NetEndpoint {
   string kind = 1;
   string node_id = 2;

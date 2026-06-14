@@ -164,6 +164,74 @@ type NFTInputs struct {
 }
 
 const (
+	DNSEngineCoreDNS = "coredns"
+
+	DNSExposureMesh   = "mesh"
+	DNSExposurePublic = "public"
+
+	DNSZoneForward = "forward"
+	DNSZoneStatic  = "static"
+	DNSZoneBlock   = "block"
+
+	DNSStatusPending  = "pending"
+	DNSStatusApplying = "applying"
+	DNSStatusRunning  = "running"
+	DNSStatusFailed   = "failed"
+	DNSStatusDisabled = "disabled"
+)
+
+// DNSZone is one served block in a self-hosted resolver configuration. It is
+// server-owned intent; the agent only receives the rendered, approved artifact.
+type DNSZone struct {
+	Suffix    string      `json:"suffix"`
+	Mode      string      `json:"mode"`
+	Upstreams []string    `json:"upstreams,omitempty"`
+	Records   []DNSRecord `json:"records,omitempty"`
+}
+
+// DNSRecord is a static authoritative record for a DNSZoneStatic zone.
+type DNSRecord struct {
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+	Value string `json:"value"`
+	TTL   int    `json:"ttl,omitempty"`
+}
+
+// DNSDeployment is the control-plane intent for a self-hosted DNS service on a
+// node. CFAPIToken is a server-side secret and must never appear in read views
+// or agent payloads.
+type DNSDeployment struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	NodeID string `json:"node_id"`
+	Engine string `json:"engine"`
+
+	ListenPort int    `json:"listen_port"`
+	EnableUDP  bool   `json:"enable_udp"`
+	EnableTCP  bool   `json:"enable_tcp"`
+	Exposure   string `json:"exposure"`
+
+	Zones []DNSZone `json:"zones"`
+
+	Hostname      string `json:"hostname,omitempty"`
+	PublishIPv4   bool   `json:"publish_ipv4"`
+	PublishIPv6   bool   `json:"publish_ipv6"`
+	RecordTTL     int    `json:"record_ttl,omitempty"`
+	CFAPIToken    string `json:"cf_api_token,omitempty"`
+	DDNSProfileID string `json:"ddns_profile_id,omitempty"`
+
+	Status        string    `json:"status"`
+	EngineVersion string    `json:"engine_version,omitempty"`
+	LastIPv4      string    `json:"last_ipv4,omitempty"`
+	LastIPv6      string    `json:"last_ipv6,omitempty"`
+	LastAppliedAt time.Time `json:"last_applied_at,omitempty"`
+	LastError     string    `json:"last_error,omitempty"`
+	Disabled      bool      `json:"disabled,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+const (
 	NetRuleAllow = "allow"
 	NetRuleDeny  = "deny"
 

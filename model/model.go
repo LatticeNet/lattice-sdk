@@ -313,6 +313,9 @@ const (
 	ProxyUserStatusExpired   = "expired"
 	ProxyUserStatusOverQuota = "over_quota"
 	ProxyUserStatusDisabled  = "disabled"
+
+	ProxyUsageCollectorStatusOK    = "ok"
+	ProxyUsageCollectorStatusError = "error"
 )
 
 // ProxyInbound is the central protocol/transport template that the server
@@ -396,8 +399,19 @@ type ProxyNodeProfile struct {
 	AppliedSHA256 string    `json:"applied_sha256,omitempty"`
 	LastApplyAt   time.Time `json:"last_apply_at,omitempty"`
 	LastError     string    `json:"last_error,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+
+	// Usage collector health is agent-reported and server persisted for
+	// operator visibility. It is not client-editable policy and must not affect
+	// the server's monotonic usage accounting.
+	UsageCollectorSource      string    `json:"usage_collector_source,omitempty"`
+	UsageCollectorStatus      string    `json:"usage_collector_status,omitempty"`
+	UsageCollectorCheckedAt   time.Time `json:"usage_collector_checked_at,omitempty"`
+	UsageCollectorLastOKAt    time.Time `json:"usage_collector_last_ok_at,omitempty"`
+	UsageCollectorLastError   string    `json:"usage_collector_last_error,omitempty"`
+	UsageCollectorLastErrorAt time.Time `json:"usage_collector_last_error_at,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // ProxyUsageSnapshot is the last node-reported accounting snapshot. The server
@@ -407,6 +421,14 @@ type ProxyUsageSnapshot struct {
 	At            time.Time        `json:"at"`
 	CoreUptimeSec uint64           `json:"core_uptime_sec"`
 	UserBytes     map[string]int64 `json:"user_bytes"`
+
+	// Collector fields describe this collection attempt. They let the agent
+	// report local collector errors without overwriting the previous accounting
+	// baseline on the server.
+	CollectorSource    string    `json:"collector_source,omitempty"` // file | http | future core transport
+	CollectorStatus    string    `json:"collector_status,omitempty"` // ok | error
+	CollectorError     string    `json:"collector_error,omitempty"`
+	CollectorCheckedAt time.Time `json:"collector_checked_at,omitempty"`
 }
 
 // NodeGeo is operator-supplied map metadata for a node. Agent-reported geo, if

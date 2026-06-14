@@ -146,6 +146,8 @@ message DNSDeploymentView {
   bool disabled = 23;
   TimePoint created_at = 24;
   TimePoint updated_at = 25;
+  TimePoint last_published_at = 26;
+  string last_publish_error = 27;
 }
 
 message NetEndpoint {

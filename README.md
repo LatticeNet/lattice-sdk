@@ -54,6 +54,11 @@ Agent authentication is transport metadata: node tokens belong in the
 `Authorization: Bearer` header and are intentionally absent from proto request
 messages.
 
+`DNSDeploymentView` intentionally separates CoreDNS/nft service apply status
+(`last_applied_at` / `last_error`) from Cloudflare hostname publication status
+(`last_published_at` / `last_publish_error`). Clients must not overload service
+status fields to infer DDNS publication health.
+
 Plugin integrity is also part of the contract. High-risk system plugins should
 publish `publisher`, `digest_sha256`, and `signature_ed25519`; loaders verify
 the digest against the artifact bytes and the Ed25519 signature against an

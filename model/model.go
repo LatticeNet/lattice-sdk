@@ -220,15 +220,17 @@ type DNSDeployment struct {
 	CFAPIToken    string `json:"cf_api_token,omitempty"`
 	DDNSProfileID string `json:"ddns_profile_id,omitempty"`
 
-	Status        string    `json:"status"`
-	EngineVersion string    `json:"engine_version,omitempty"`
-	LastIPv4      string    `json:"last_ipv4,omitempty"`
-	LastIPv6      string    `json:"last_ipv6,omitempty"`
-	LastAppliedAt time.Time `json:"last_applied_at,omitempty"`
-	LastError     string    `json:"last_error,omitempty"`
-	Disabled      bool      `json:"disabled,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	Status           string    `json:"status"`
+	EngineVersion    string    `json:"engine_version,omitempty"`
+	LastIPv4         string    `json:"last_ipv4,omitempty"`
+	LastIPv6         string    `json:"last_ipv6,omitempty"`
+	LastAppliedAt    time.Time `json:"last_applied_at,omitempty"`
+	LastError        string    `json:"last_error,omitempty"`
+	LastPublishedAt  time.Time `json:"last_published_at,omitempty"`
+	LastPublishError string    `json:"last_publish_error,omitempty"`
+	Disabled         bool      `json:"disabled,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 const (

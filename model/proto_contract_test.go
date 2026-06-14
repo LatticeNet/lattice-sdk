@@ -132,6 +132,8 @@ func TestProtoContractsExistAndStayRedacted(t *testing.T) {
 		"string status = 17;",
 		"TimePoint created_at = 24;",
 		"TimePoint updated_at = 25;",
+		"TimePoint last_published_at = 26;",
+		"string last_publish_error = 27;",
 	} {
 		if !strings.Contains(dnsDeployment, field) {
 			t.Fatalf("DNSDeploymentView missing field %s", field)

@@ -112,6 +112,12 @@ func TestProtoContractsExistAndStayRedacted(t *testing.T) {
 			t.Fatalf("ApiError missing field %s", field)
 		}
 	}
+	netEndpoint := messageBody(t, string(common), "NetEndpoint")
+	for _, field := range []string{"string kind = 1;", "string node_id = 2;", "string cidr = 3;", "string domain = 4;"} {
+		if !strings.Contains(netEndpoint, field) {
+			t.Fatalf("NetEndpoint missing field %s", field)
+		}
+	}
 }
 
 func readAllProto(t *testing.T, root string) string {

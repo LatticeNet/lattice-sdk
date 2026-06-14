@@ -174,17 +174,21 @@ const (
 	NetProtoUDP = "udp"
 	NetProtoAny = "any"
 
-	NetRefNode = "node"
-	NetRefCIDR = "cidr"
-	NetRefAny  = "any"
+	NetRefNode   = "node"
+	NetRefCIDR   = "cidr"
+	NetRefDomain = "domain"
+	NetRefAny    = "any"
 )
 
 // NetEndpoint describes the non-target side of a policy rule. Node refs are
-// resolved by the server at validation/graph/compile time.
+// resolved by the server at validation/graph/compile time. Domain refs are
+// egress-only and compile to named nft sets that the node refreshes through the
+// agent's DNS updater; they are not accepted as ingress identity.
 type NetEndpoint struct {
 	Kind   string `json:"kind"`
 	NodeID string `json:"node_id,omitempty"`
 	CIDR   string `json:"cidr,omitempty"`
+	Domain string `json:"domain,omitempty"`
 }
 
 // NetRule is an ordered operator-authored L3/L4 policy rule evaluated on the

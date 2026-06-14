@@ -110,6 +110,7 @@ message NetEndpoint {
   string kind = 1;
   string node_id = 2;
   string cidr = 3;
+  string domain = 4;
 }
 
 message NetRule {

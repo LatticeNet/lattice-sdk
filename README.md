@@ -15,8 +15,9 @@ github.com/LatticeNet/lattice-sdk
 ## Packages
 
 - `model` - users, tokens, nodes, metrics, HostFacts, MachineProfile inventory
-  metadata, NFTInputs, NetPolicy/NodeGeo intent state, tasks, task results,
-  audit events, KV entries, static objects, Worker scripts, and approvals.
+  metadata, NFTInputs, NetPolicy/NodeGeo intent state, approval-linked tasks,
+  task results, audit events, KV entries, static objects, Worker scripts, and
+  approvals.
 
 ## Proto Contracts
 

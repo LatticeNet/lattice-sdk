@@ -230,6 +230,7 @@ type NodeGeo struct {
 
 type Task struct {
 	ID          string    `json:"id"`
+	ApprovalID  string    `json:"approval_id,omitempty"`
 	ActorID     string    `json:"actor_id"`
 	TokenID     string    `json:"token_id"`
 	Targets     []string  `json:"targets"`

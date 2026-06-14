@@ -370,6 +370,12 @@ type ProxyUser struct {
 	LastSeenAt time.Time `json:"last_seen_at,omitempty"`
 	Status     string    `json:"status"`
 
+	// Server-managed notification cursors. They prevent repeated quota/expiry
+	// alerts after the operator has already been notified for the current limit
+	// or expiry date.
+	LastQuotaNotifiedKey  string `json:"last_quota_notified_key,omitempty"`
+	LastExpiryNotifiedKey string `json:"last_expiry_notified_key,omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

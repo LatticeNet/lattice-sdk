@@ -72,6 +72,30 @@ type Node struct {
 	CreatedAt          time.Time `json:"created_at"`
 }
 
+// AgentUpdatePolicy is a server-owned node-agent update intent. It carries no
+// secrets: operators provide a public HTTPS binary URL plus the expected SHA-256
+// digest, and the server turns that into a reviewed, plan-hash-bound update
+// task. AutoPlan never mutates a node directly; it only creates a pending
+// approval when the node reports a different AgentVersion and no equivalent
+// pending/approved update is already open.
+type AgentUpdatePolicy struct {
+	NodeID             string    `json:"node_id"`
+	Enabled            bool      `json:"enabled"`
+	AutoPlan           bool      `json:"auto_plan"`
+	TargetVersion      string    `json:"target_version"`
+	BinaryURL          string    `json:"binary_url"`
+	SHA256             string    `json:"sha256"`
+	InstallPath        string    `json:"install_path"`
+	ServiceName        string    `json:"service_name"`
+	LastPlannedVersion string    `json:"last_planned_version,omitempty"`
+	LastPlannedAt      time.Time `json:"last_planned_at,omitempty"`
+	LastAppliedVersion string    `json:"last_applied_version,omitempty"`
+	LastAppliedAt      time.Time `json:"last_applied_at,omitempty"`
+	LastError          string    `json:"last_error,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
 type Metrics struct {
 	CPUPercent    float64   `json:"cpu_percent"`
 	Load1         float64   `json:"load1"`

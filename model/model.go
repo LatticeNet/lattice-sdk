@@ -233,6 +233,38 @@ type DNSDeployment struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
+// GeoRouting answers one apex hostname (e.g. dns.roobli.org) with the nearest
+// healthy participating node, served by Lattice's own DNS nodes (Design 06,
+// Path B). It carries no secrets: the NS-delegation token is reused from the
+// referenced DDNSProfile.
+type GeoRouting struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Hostname    string   `json:"hostname"`     // the geo apex, e.g. dns.roobli.org
+	NodeIDs     []string `json:"node_ids"`     // participating targets (need NodeGeo + IP)
+	DNSNodeIDs  []string `json:"dns_node_ids"` // authoritative DNS nodes (run self-host DNS)
+	TTL         int      `json:"ttl,omitempty"`
+	Strategy    string   `json:"strategy"`                // "geoip" | "all-healthy"
+	GeoIPDBPath string   `json:"geoip_db_path,omitempty"` // GeoLite2 path on the node
+
+	// Parent-zone NS delegation reuses the referenced DDNSProfile's CF token.
+	PublishNS     bool   `json:"publish_ns,omitempty"`
+	DDNSProfileID string `json:"ddns_profile_id,omitempty"`
+
+	LastRenderedSHA string    `json:"last_rendered_sha,omitempty"`
+	Status          string    `json:"status,omitempty"`
+	LastAppliedAt   time.Time `json:"last_applied_at,omitempty"`
+	LastDelegatedAt time.Time `json:"last_delegated_at,omitempty"`
+	LastError       string    `json:"last_error,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+const (
+	GeoRoutingStrategyGeoIP      = "geoip"
+	GeoRoutingStrategyAllHealthy = "all-healthy"
+)
+
 const (
 	NetRuleAllow = "allow"
 	NetRuleDeny  = "deny"

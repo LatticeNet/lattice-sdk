@@ -649,6 +649,48 @@ type MonitorResult struct {
 	Error     string    `json:"error,omitempty"`
 }
 
+// LogSource declares a file on a node whose appended lines are tailed by the
+// assigned agent and shipped to the server. It is assignment-driven like
+// Monitor: exactly one node owns a source (a path is node-local), identified by
+// NodeID. LogSource carries no secrets.
+type LogSource struct {
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	NodeID        string    `json:"node_id"`
+	Path          string    `json:"path"`
+	Enabled       bool      `json:"enabled"`
+	MaxLineBytes  int       `json:"max_line_bytes"`  // truncate longer lines (server default 16384)
+	MaxBatchLines int       `json:"max_batch_lines"` // agent batch cap (server default 500)
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// LogLine is one ingested line as persisted/queried. Seq is the server-assigned
+// monotonic per-source ingest sequence (the query cursor); Offset is the agent's
+// byte offset after this line in the (rotation-scoped) source file.
+type LogLine struct {
+	SourceID  string    `json:"source_id"`
+	NodeID    string    `json:"node_id"`
+	Path      string    `json:"path"`
+	Seq       uint64    `json:"seq"`
+	Offset    uint64    `json:"offset"`
+	At        time.Time `json:"at"`
+	Line      string    `json:"line"`
+	Truncated bool      `json:"truncated,omitempty"`
+}
+
+// LogBatch is the agent -> server ingest envelope (one source per batch).
+type LogBatch struct {
+	SourceID   string    `json:"source_id"`
+	Path       string    `json:"path"`      // echoed for server cross-check vs the source record
+	RotID      string    `json:"rot_id"`    // opaque per-file-incarnation id (inode/ctime)
+	FirstOff   uint64    `json:"first_off"` // offset before the first line in this batch
+	LastOff    uint64    `json:"last_off"`  // offset after the last line (== agent checkpoint)
+	Dropped    uint64    `json:"dropped"`   // lines the agent dropped (backpressure) since last batch
+	Lines      []string  `json:"lines"`     // raw lines, ordered, no trailing newline
+	CapturedAt time.Time `json:"captured_at"`
+}
+
 // NotifyChannel is a persisted notification destination. Config holds
 // provider-specific fields (e.g. token, chat_id, webhook_url); its values are
 // secret and never serialized back to clients.

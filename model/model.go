@@ -521,16 +521,20 @@ type ProxyUsageSnapshot struct {
 	CollectorCheckedAt time.Time `json:"collector_checked_at,omitempty"`
 }
 
-// NodeGeo is operator-supplied map metadata for a node. Agent-reported geo, if
-// ever accepted, is low-trust and must not overwrite operator-entered values.
+// NodeGeo is map metadata for a node. Operator-entered values are authoritative;
+// automatic GeoIP values are advisory and should not overwrite operator values
+// unless an operator explicitly asks for that replacement.
 type NodeGeo struct {
 	Country   string    `json:"country,omitempty"`
+	Region    string    `json:"region,omitempty"`
 	City      string    `json:"city,omitempty"`
 	Lat       float64   `json:"lat,omitempty"`
 	Lon       float64   `json:"lon,omitempty"`
+	IP        string    `json:"ip,omitempty"`
 	ASN       int       `json:"asn,omitempty"`
 	ASOrg     string    `json:"as_org,omitempty"`
 	Provider  string    `json:"provider,omitempty"`
+	Source    string    `json:"source,omitempty"`
 	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
 

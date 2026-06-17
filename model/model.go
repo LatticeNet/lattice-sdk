@@ -590,6 +590,51 @@ type StaticObject struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+const (
+	StorageKindKV     = "kv"
+	StorageKindStatic = "static"
+
+	StorageAccessAdmin = "admin"
+	StorageAccessRead  = "read"
+	StorageAccessWrite = "write"
+)
+
+type StorageBucket struct {
+	ID               string    `json:"id"`
+	Kind             string    `json:"kind"`
+	Name             string    `json:"name"`
+	DisplayName      string    `json:"display_name,omitempty"`
+	Description      string    `json:"description,omitempty"`
+	IndexDocument    string    `json:"index_document,omitempty"`
+	NotFoundDocument string    `json:"not_found_document,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type StorageBinding struct {
+	ID         string    `json:"id"`
+	Kind       string    `json:"kind"`
+	Bucket     string    `json:"bucket"`
+	Hostname   string    `json:"hostname"`
+	PathPrefix string    `json:"path_prefix,omitempty"`
+	Enabled    bool      `json:"enabled"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+type StorageAccessToken struct {
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	TokenHash  string    `json:"token_hash,omitempty"`
+	Kind       string    `json:"kind"`
+	Access     string    `json:"access"`
+	Buckets    []string  `json:"buckets,omitempty"`
+	RevokedAt  time.Time `json:"revoked_at,omitempty"`
+	LastUsedAt time.Time `json:"last_used_at,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
 type WorkerScript struct {
 	ID           string    `json:"id"`
 	Name         string    `json:"name"`
@@ -758,6 +803,22 @@ type NotifyChannel struct {
 	Enabled   bool              `json:"enabled"`
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`
+}
+
+// NotifyRule routes notification events to one or more destinations. EventTypes
+// uses stable server event ids such as monitor.down or ssh.login; "*" matches
+// all notification events. Templates are intentionally small string templates
+// expanded by the server with event_type, title, and body variables.
+type NotifyRule struct {
+	ID            string    `json:"id"`
+	Name          string    `json:"name"`
+	EventTypes    []string  `json:"event_types,omitempty"`
+	ChannelIDs    []string  `json:"channel_ids,omitempty"`
+	TitleTemplate string    `json:"title_template,omitempty"`
+	BodyTemplate  string    `json:"body_template,omitempty"`
+	Enabled       bool      `json:"enabled"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // TunnelIngress maps a public hostname to a node-local service for a Cloudflare

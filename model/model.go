@@ -51,25 +51,59 @@ type Token struct {
 }
 
 type Node struct {
-	ID                 string    `json:"id"`
-	Name               string    `json:"name"`
-	TokenHash          string    `json:"token_hash"`
-	Tags               []string  `json:"tags"`
-	Role               string    `json:"role"`
-	WireGuardIP        string    `json:"wireguard_ip"`
-	WireGuardPublicKey string    `json:"wireguard_public_key,omitempty"`
-	WireGuardEndpoint  string    `json:"wireguard_endpoint,omitempty"`
-	WireGuardPort      int       `json:"wireguard_port,omitempty"`
-	PublicIP           string    `json:"public_ip"`
-	PublicIPv6         string    `json:"public_ipv6,omitempty"`
-	AgentVersion       string    `json:"agent_version"`
-	Online             bool      `json:"online"`
-	Disabled           bool      `json:"disabled,omitempty"`
-	LastSeen           time.Time `json:"last_seen"`
-	Metrics            Metrics   `json:"metrics"`
-	HostFacts          HostFacts `json:"host_facts"`
-	Geo                *NodeGeo  `json:"geo,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
+	ID                 string           `json:"id"`
+	Name               string           `json:"name"`
+	TokenHash          string           `json:"token_hash"`
+	Tags               []string         `json:"tags"`
+	Role               string           `json:"role"`
+	WireGuardIP        string           `json:"wireguard_ip"`
+	WireGuardPublicKey string           `json:"wireguard_public_key,omitempty"`
+	WireGuardEndpoint  string           `json:"wireguard_endpoint,omitempty"`
+	WireGuardPort      int              `json:"wireguard_port,omitempty"`
+	PublicIP           string           `json:"public_ip"`
+	PublicIPv6         string           `json:"public_ipv6,omitempty"`
+	AgentVersion       string           `json:"agent_version"`
+	Online             bool             `json:"online"`
+	Disabled           bool             `json:"disabled,omitempty"`
+	LastSeen           time.Time        `json:"last_seen"`
+	Metrics            Metrics          `json:"metrics"`
+	HostFacts          HostFacts        `json:"host_facts"`
+	Geo                *NodeGeo         `json:"geo,omitempty"`
+	AgentDebug         AgentDebugPolicy `json:"agent_debug"`
+	CreatedAt          time.Time        `json:"created_at"`
+}
+
+// AgentDebugPolicy is the operator-owned diagnostic mode for a node-agent. When
+// Enabled is true the agent emits verbose non-secret diagnostics locally on the
+// node. Collect controls whether those diagnostics are also shipped back to the
+// server log store. Server-managed debug collection defaults to true when
+// enabled, but operators may keep local node debug output without central
+// collection by setting Collect=false.
+type AgentDebugPolicy struct {
+	Enabled   bool      `json:"enabled"`
+	Collect   bool      `json:"collect"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
+}
+
+// AgentDebugConfig is the runtime policy an agent polls from the server. It is
+// intentionally small and non-secret so older agents can ignore it safely.
+type AgentDebugConfig struct {
+	Enabled       bool `json:"enabled"`
+	Collect       bool `json:"collect"`
+	MaxLineBytes  int  `json:"max_line_bytes,omitempty"`
+	MaxBatchLines int  `json:"max_batch_lines,omitempty"`
+}
+
+type AgentConfig struct {
+	Debug AgentDebugConfig `json:"debug"`
+}
+
+// AgentDebugBatch carries locally emitted agent diagnostics to the server log
+// store when server-side collection is enabled for the node.
+type AgentDebugBatch struct {
+	NodeID     string    `json:"node_id"`
+	Lines      []string  `json:"lines"`
+	CapturedAt time.Time `json:"captured_at"`
 }
 
 // AgentUpdatePolicy is a server-owned node-agent update intent. It carries no

@@ -8,6 +8,11 @@ const (
 	TaskFinished = "finished"
 	TaskFailed   = "failed"
 
+	TerminalPending = "pending"
+	TerminalOpen    = "open"
+	TerminalClosed  = "closed"
+	TerminalFailed  = "failed"
+
 	ApprovalPending  = "pending"
 	ApprovalApproved = "approved"
 	ApprovalRejected = "rejected"
@@ -566,6 +571,40 @@ type TaskResult struct {
 	Error      string    `json:"error"`
 	StartedAt  time.Time `json:"started_at"`
 	FinishedAt time.Time `json:"finished_at"`
+}
+
+type TerminalSession struct {
+	ID        string    `json:"id"`
+	NodeID    string    `json:"node_id"`
+	ActorID   string    `json:"actor_id,omitempty"`
+	TokenID   string    `json:"token_id,omitempty"`
+	Shell     string    `json:"shell,omitempty"`
+	Cols      int       `json:"cols,omitempty"`
+	Rows      int       `json:"rows,omitempty"`
+	Status    string    `json:"status"`
+	Error     string    `json:"error,omitempty"`
+	BytesIn   int64     `json:"bytes_in,omitempty"`
+	BytesOut  int64     `json:"bytes_out,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	OpenedAt  time.Time `json:"opened_at,omitempty"`
+	ClosedAt  time.Time `json:"closed_at,omitempty"`
+	LastSeen  time.Time `json:"last_seen,omitempty"`
+}
+
+type TerminalEvent struct {
+	Seq       int64     `json:"seq"`
+	Kind      string    `json:"kind"`
+	Data      string    `json:"data,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type TerminalInput struct {
+	Seq       int64     `json:"seq"`
+	Kind      string    `json:"kind"`
+	Data      string    `json:"data,omitempty"`
+	Cols      int       `json:"cols,omitempty"`
+	Rows      int       `json:"rows,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type AuditEvent struct {

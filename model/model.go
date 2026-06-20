@@ -388,6 +388,11 @@ type NetPolicy struct {
 	TargetNodeID  string    `json:"target_node_id"`
 	Rules         []NetRule `json:"rules"`
 	Enabled       bool      `json:"enabled"`
+	// GroupDerived marks a per-node policy materialized from one or more
+	// GroupNetPolicy documents (server-side expansion). Manually-authored
+	// per-node policies leave it false. Materialization refuses to overwrite a
+	// manual policy, so the two authoring lanes never silently clobber.
+	GroupDerived  bool      `json:"group_derived,omitempty"`
 	LastPlanSHA   string    `json:"last_plan_sha,omitempty"`
 	LastAppliedAt time.Time `json:"last_applied_at,omitempty"`
 	LastError     string    `json:"last_error,omitempty"`

@@ -75,7 +75,13 @@ type Node struct {
 	HostFacts          HostFacts        `json:"host_facts"`
 	Geo                *NodeGeo         `json:"geo,omitempty"`
 	AgentDebug         AgentDebugPolicy `json:"agent_debug"`
-	CreatedAt          time.Time        `json:"created_at"`
+	// GroupIDs is the node's resolved group memberships. It is a server-computed,
+	// read-only convenience field (the union of every group whose explicit
+	// Members or display Selector resolves this node); it is never authored by a
+	// client and is not persisted as node intent. Tags/Role remain the underlying
+	// facts that selectors read.
+	GroupIDs  []string  `json:"group_ids,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // AgentDebugPolicy is the operator-owned diagnostic mode for a node-agent. When
@@ -343,6 +349,10 @@ const (
 	NetRefCIDR   = "cidr"
 	NetRefDomain = "domain"
 	NetRefAny    = "any"
+	// NetRefGroup is a group-scoped remote. It is an authoring-layer kind only:
+	// the server expands it to one concrete node ref per resolved group member
+	// before compilation, so the per-node nft compiler never sees a group ref.
+	NetRefGroup = "group"
 )
 
 // NetEndpoint describes the non-target side of a policy rule. Node refs are
@@ -350,10 +360,11 @@ const (
 // egress-only and compile to named nft sets that the node refreshes through the
 // agent's DNS updater; they are not accepted as ingress identity.
 type NetEndpoint struct {
-	Kind   string `json:"kind"`
-	NodeID string `json:"node_id,omitempty"`
-	CIDR   string `json:"cidr,omitempty"`
-	Domain string `json:"domain,omitempty"`
+	Kind    string `json:"kind"`
+	NodeID  string `json:"node_id,omitempty"`
+	CIDR    string `json:"cidr,omitempty"`
+	Domain  string `json:"domain,omitempty"`
+	GroupID string `json:"group_id,omitempty"` // set when Kind == NetRefGroup; resolved to node refs before compile
 }
 
 // NetRule is an ordered operator-authored L3/L4 policy rule evaluated on the
@@ -382,6 +393,72 @@ type NetPolicy struct {
 	LastError     string    `json:"last_error,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// Group is a first-class fleet organization entity. A node's policy-relevant
+// membership is the explicit Members list (the canonical source of truth);
+// Selector is a display-only "smart filter" used to suggest/filter on the
+// dashboard and to seed groups during migration — it never silently changes a
+// firewall. Color is a design-token name (e.g. "sky", "violet"), never a raw
+// hex value, so the dashboard stays CSP-safe. Slug is url/nft-safe, unique, and
+// treated as immutable once assigned. ParentID gives a single-parent hierarchy
+// ("" = root); Order is the operator-controlled sort weight within a parent.
+type Group struct {
+	ID          string         `json:"id"`   // "grp_<ulid>"
+	Name        string         `json:"name"` // unique, display
+	Slug        string         `json:"slug"` // url/nft-safe, unique, immutable
+	Description string         `json:"description,omitempty"`
+	Color       string         `json:"color"`               // design-token name, never raw hex (CSP)
+	Icon        string         `json:"icon,omitempty"`      // lucide icon name
+	ParentID    string         `json:"parent_id,omitempty"` // single parent; "" = root
+	Order       int            `json:"order"`               // sort weight within the parent
+	Members     []string       `json:"members"`             // explicit node IDs — the CANONICAL membership
+	Selector    *GroupSelector `json:"selector,omitempty"`  // DISPLAY-ONLY smart filter, not a policy input
+	System      bool           `json:"system,omitempty"`    // built-in (e.g. "Ungrouped"); limited edits
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+}
+
+// GroupSelector is a read-only "smart group" used only for dashboard filtering
+// and migration seeding. It is NOT a policy input: the compiler never reads it,
+// so a spoofed tag can mis-scope display but cannot bypass per-node nft. Each
+// field is an OR-set; a node matches the selector when it satisfies any one of
+// the populated criteria (tags-any / roles / country / continent).
+type GroupSelector struct {
+	MatchTagsAny   []string `json:"match_tags_any,omitempty"`
+	MatchRoles     []string `json:"match_roles,omitempty"`
+	MatchCountry   []string `json:"match_country,omitempty"`   // ISO-3166 alpha-2 codes
+	MatchContinent []string `json:"match_continent,omitempty"` // AS/EU/NA/SA/AF/OC/AN
+}
+
+// GroupNetPolicy is a group-scoped authoring layer over the unchanged per-node
+// NetPolicy engine. The server expands it into one NetPolicy per member of
+// ScopeGroupID before compilation; the agent never receives it. Priority breaks
+// ties when a node is a member of two or more scoped groups (lower wins).
+type GroupNetPolicy struct {
+	ID           string         `json:"id"`             // "gnp_<ulid>"
+	ScopeGroupID string         `json:"scope_group_id"` // applies to members of this group
+	Rules        []GroupNetRule `json:"rules"`
+	Enabled      bool           `json:"enabled"`
+	Priority     int            `json:"priority"` // lower wins when a node is in 2+ scoped groups
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+}
+
+// GroupNetRule mirrors NetRule but its Remote may additionally be a group ref
+// (Remote.Kind == NetRefGroup with Remote.GroupID set). The server fans a group
+// remote out to one node-ref rule per resolved remote member during expansion,
+// so the compiled per-node rule set only ever contains node/cidr/domain/any
+// remotes.
+type GroupNetRule struct {
+	ID        string      `json:"id"`
+	Comment   string      `json:"comment,omitempty"`
+	Action    string      `json:"action"`
+	Direction string      `json:"direction"`
+	Protocol  string      `json:"protocol"`
+	Ports     []int       `json:"ports,omitempty"`
+	Remote    NetEndpoint `json:"remote"` // Kind may be NetRefGroup in addition to node|cidr|domain|any
+	Disabled  bool        `json:"disabled,omitempty"`
 }
 
 const (

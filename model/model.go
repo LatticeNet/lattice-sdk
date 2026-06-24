@@ -75,6 +75,11 @@ type Node struct {
 	HostFacts          HostFacts        `json:"host_facts"`
 	Geo                *NodeGeo         `json:"geo,omitempty"`
 	AgentDebug         AgentDebugPolicy `json:"agent_debug"`
+	// TerminalTransport is the operator-owned per-node terminal transport: "poll"
+	// (default) or "stream". Empty is treated as the deployment default. It is the
+	// rollout lever for promoting the streaming terminal one node at a time; the
+	// agent reads it from its polled AgentConfig and applies it to new sessions.
+	TerminalTransport  string           `json:"terminal_transport,omitempty"`
 	// GroupIDs is the node's resolved group memberships. It is a server-computed,
 	// read-only convenience field (the union of every group whose explicit
 	// Members or display Selector resolves this node); it is never authored by a
@@ -107,6 +112,12 @@ type AgentDebugConfig struct {
 
 type AgentConfig struct {
 	Debug AgentDebugConfig `json:"debug"`
+	// TerminalTransport is the server's per-node override for the agent terminal
+	// transport: "poll" or "stream". Empty means "no override" — the agent keeps
+	// its startup -terminal-transport / LATTICE_TERMINAL_TRANSPORT value. This is
+	// the rollout lever for promoting streaming per node without a redeploy; it
+	// affects only sessions opened after the change, never in-flight ones.
+	TerminalTransport string `json:"terminal_transport,omitempty"`
 }
 
 // AgentDebugBatch carries locally emitted agent diagnostics to the server log

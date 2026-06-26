@@ -79,7 +79,7 @@ type Node struct {
 	// (default) or "stream". Empty is treated as the deployment default. It is the
 	// rollout lever for promoting the streaming terminal one node at a time; the
 	// agent reads it from its polled AgentConfig and applies it to new sessions.
-	TerminalTransport  string           `json:"terminal_transport,omitempty"`
+	TerminalTransport string `json:"terminal_transport,omitempty"`
 	// GroupIDs is the node's resolved group memberships. It is a server-computed,
 	// read-only convenience field (the union of every group whose explicit
 	// Members or display Selector resolves this node); it is never authored by a
@@ -395,10 +395,10 @@ type NetRule struct {
 // only: the agent does not receive it directly. A later iteration compiles this
 // policy into nft with dead-man rollback.
 type NetPolicy struct {
-	ID            string    `json:"id"`
-	TargetNodeID  string    `json:"target_node_id"`
-	Rules         []NetRule `json:"rules"`
-	Enabled       bool      `json:"enabled"`
+	ID           string    `json:"id"`
+	TargetNodeID string    `json:"target_node_id"`
+	Rules        []NetRule `json:"rules"`
+	Enabled      bool      `json:"enabled"`
 	// GroupDerived marks a per-node policy materialized from one or more
 	// GroupNetPolicy documents (server-side expansion). Manually-authored
 	// per-node policies leave it false. Materialization refuses to overwrite a
@@ -430,9 +430,14 @@ type Group struct {
 	Order       int            `json:"order"`               // sort weight within the parent
 	Members     []string       `json:"members"`             // explicit node IDs — the CANONICAL membership
 	Selector    *GroupSelector `json:"selector,omitempty"`  // DISPLAY-ONLY smart filter, not a policy input
-	System      bool           `json:"system,omitempty"`    // built-in (e.g. "Ungrouped"); limited edits
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
+	// LeaderID is the operator-designated group leader. It must be an explicit
+	// Member of the group (validated on upsert); empty means "no leader". This is
+	// the real, first-class field that replaces the old role-name heuristic used
+	// by the dashboard to mark a node as its group's leader.
+	LeaderID  string    `json:"leader_id,omitempty"`
+	System    bool      `json:"system,omitempty"` // built-in (e.g. "Ungrouped"); limited edits
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // GroupSelector is a read-only "smart group" used only for dashboard filtering

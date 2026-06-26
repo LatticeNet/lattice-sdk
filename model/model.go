@@ -67,6 +67,10 @@ type Node struct {
 	WireGuardPort      int              `json:"wireguard_port,omitempty"`
 	PublicIP           string           `json:"public_ip"`
 	PublicIPv6         string           `json:"public_ipv6,omitempty"`
+	// InternalIP / InternalIPv6 are the node's LAN/primary-interface addresses,
+	// reported by the agent. Informational (not geocoded); private ranges allowed.
+	InternalIP         string           `json:"internal_ip,omitempty"`
+	InternalIPv6       string           `json:"internal_ipv6,omitempty"`
 	AgentVersion       string           `json:"agent_version"`
 	Online             bool             `json:"online"`
 	Disabled           bool             `json:"disabled,omitempty"`

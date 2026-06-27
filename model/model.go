@@ -7,6 +7,10 @@ const (
 	TaskLeased   = "leased"
 	TaskFinished = "finished"
 	TaskFailed   = "failed"
+	// TaskCancelled is an operator-cancelled task. Only a queued task can be
+	// cancelled (a leased task is already running on the agent and cannot be
+	// reliably stopped from the server); it is then never leased.
+	TaskCancelled = "cancelled"
 
 	TerminalPending = "pending"
 	TerminalOpen    = "open"

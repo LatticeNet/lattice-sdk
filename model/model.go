@@ -141,19 +141,23 @@ const (
 	NodeIPModeAuto     = "auto"     // static override if set, else resolver probe
 	NodeIPModeStatic   = "static"   // use the operator-provided static IPs only
 	NodeIPModeResolver = "resolver" // always probe the resolvers, ignore static
+	NodeIPModeScript   = "script"   // run an operator-provided script on the agent
 )
 
 // NodeIPConfig is the operator-owned, per-node override for how the agent
 // determines its public IPs. It mirrors the agent's -ip-mode / -ip-resolvers /
 // -public-ip startup flags so the server can push a change without a redeploy.
-// An empty Mode means "no override". Custom-script discovery is intentionally
-// NOT part of this struct yet (it is a separate, sandboxed feature).
+// An empty Mode means "no override". Script discovery is high-trust node-local
+// code: the server stores Script for the agent only, and read-facing node views
+// should redact Script while keeping ScriptSHA256 for operator confirmation.
 type NodeIPConfig struct {
-	Mode       string    `json:"mode,omitempty"` // "" | auto | static | resolver
-	StaticIPv4 string    `json:"static_ipv4,omitempty"`
-	StaticIPv6 string    `json:"static_ipv6,omitempty"`
-	Resolvers  []string  `json:"resolvers,omitempty"` // IP-echo URLs; empty = agent defaults
-	UpdatedAt  time.Time `json:"updated_at,omitempty"`
+	Mode         string    `json:"mode,omitempty"` // "" | auto | static | resolver | script
+	StaticIPv4   string    `json:"static_ipv4,omitempty"`
+	StaticIPv6   string    `json:"static_ipv6,omitempty"`
+	Resolvers    []string  `json:"resolvers,omitempty"` // IP-echo URLs; empty = agent defaults
+	Script       string    `json:"script,omitempty"`    // server->agent only; redact from node views
+	ScriptSHA256 string    `json:"script_sha256,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at,omitempty"`
 }
 
 // AgentDebugBatch carries locally emitted agent diagnostics to the server log

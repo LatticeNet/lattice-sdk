@@ -88,6 +88,11 @@ type Node struct {
 	// rollout lever for promoting the streaming terminal one node at a time; the
 	// agent reads it from its polled AgentConfig and applies it to new sessions.
 	TerminalTransport string `json:"terminal_transport,omitempty"`
+	// IPConfig is the operator-owned, per-node override for how the agent
+	// discovers its public IPs (mirrors the agent's -ip-mode/-ip-resolvers
+	// flags). nil means "no override" — the agent keeps its startup flags. It is
+	// pushed down through the polled AgentConfig.
+	IPConfig *NodeIPConfig `json:"ip_config,omitempty"`
 	// GroupIDs is the node's resolved group memberships. It is a server-computed,
 	// read-only convenience field (the union of every group whose explicit
 	// Members or display Selector resolves this node); it is never authored by a
@@ -126,6 +131,29 @@ type AgentConfig struct {
 	// the rollout lever for promoting streaming per node without a redeploy; it
 	// affects only sessions opened after the change, never in-flight ones.
 	TerminalTransport string `json:"terminal_transport,omitempty"`
+	// IPConfig is the server's per-node override for public-IP discovery. nil
+	// means "no override" — the agent keeps its startup -ip-mode/-ip-resolvers
+	// flags. Old agents that do not know this field ignore it safely.
+	IPConfig *NodeIPConfig `json:"ip_config,omitempty"`
+}
+
+const (
+	NodeIPModeAuto     = "auto"     // static override if set, else resolver probe
+	NodeIPModeStatic   = "static"   // use the operator-provided static IPs only
+	NodeIPModeResolver = "resolver" // always probe the resolvers, ignore static
+)
+
+// NodeIPConfig is the operator-owned, per-node override for how the agent
+// determines its public IPs. It mirrors the agent's -ip-mode / -ip-resolvers /
+// -public-ip startup flags so the server can push a change without a redeploy.
+// An empty Mode means "no override". Custom-script discovery is intentionally
+// NOT part of this struct yet (it is a separate, sandboxed feature).
+type NodeIPConfig struct {
+	Mode       string    `json:"mode,omitempty"` // "" | auto | static | resolver
+	StaticIPv4 string    `json:"static_ipv4,omitempty"`
+	StaticIPv6 string    `json:"static_ipv6,omitempty"`
+	Resolvers  []string  `json:"resolvers,omitempty"` // IP-echo URLs; empty = agent defaults
+	UpdatedAt  time.Time `json:"updated_at,omitempty"`
 }
 
 // AgentDebugBatch carries locally emitted agent diagnostics to the server log

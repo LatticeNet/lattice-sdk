@@ -56,29 +56,29 @@ type Token struct {
 }
 
 type Node struct {
-	ID                 string           `json:"id"`
-	Name               string           `json:"name"`
-	TokenHash          string           `json:"token_hash"`
-	Tags               []string         `json:"tags"`
-	Role               string           `json:"role"`
-	WireGuardIP        string           `json:"wireguard_ip"`
-	WireGuardPublicKey string           `json:"wireguard_public_key,omitempty"`
-	WireGuardEndpoint  string           `json:"wireguard_endpoint,omitempty"`
-	WireGuardPort      int              `json:"wireguard_port,omitempty"`
-	PublicIP           string           `json:"public_ip"`
-	PublicIPv6         string           `json:"public_ipv6,omitempty"`
+	ID                 string   `json:"id"`
+	Name               string   `json:"name"`
+	TokenHash          string   `json:"token_hash"`
+	Tags               []string `json:"tags"`
+	Role               string   `json:"role"`
+	WireGuardIP        string   `json:"wireguard_ip"`
+	WireGuardPublicKey string   `json:"wireguard_public_key,omitempty"`
+	WireGuardEndpoint  string   `json:"wireguard_endpoint,omitempty"`
+	WireGuardPort      int      `json:"wireguard_port,omitempty"`
+	PublicIP           string   `json:"public_ip"`
+	PublicIPv6         string   `json:"public_ipv6,omitempty"`
 	// InternalIP / InternalIPv6 are the node's LAN/primary-interface addresses,
 	// reported by the agent. Informational (not geocoded); private ranges allowed.
-	InternalIP         string           `json:"internal_ip,omitempty"`
-	InternalIPv6       string           `json:"internal_ipv6,omitempty"`
-	AgentVersion       string           `json:"agent_version"`
-	Online             bool             `json:"online"`
-	Disabled           bool             `json:"disabled,omitempty"`
-	LastSeen           time.Time        `json:"last_seen"`
-	Metrics            Metrics          `json:"metrics"`
-	HostFacts          HostFacts        `json:"host_facts"`
-	Geo                *NodeGeo         `json:"geo,omitempty"`
-	AgentDebug         AgentDebugPolicy `json:"agent_debug"`
+	InternalIP   string           `json:"internal_ip,omitempty"`
+	InternalIPv6 string           `json:"internal_ipv6,omitempty"`
+	AgentVersion string           `json:"agent_version"`
+	Online       bool             `json:"online"`
+	Disabled     bool             `json:"disabled,omitempty"`
+	LastSeen     time.Time        `json:"last_seen"`
+	Metrics      Metrics          `json:"metrics"`
+	HostFacts    HostFacts        `json:"host_facts"`
+	Geo          *NodeGeo         `json:"geo,omitempty"`
+	AgentDebug   AgentDebugPolicy `json:"agent_debug"`
 	// TerminalTransport is the operator-owned per-node terminal transport: "poll"
 	// (default) or "stream". Empty is treated as the deployment default. It is the
 	// rollout lever for promoting the streaming terminal one node at a time; the
@@ -157,14 +157,23 @@ type AgentUpdatePolicy struct {
 }
 
 type Metrics struct {
-	CPUPercent    float64   `json:"cpu_percent"`
-	Load1         float64   `json:"load1"`
-	MemoryUsed    uint64    `json:"memory_used"`
-	MemoryTotal   uint64    `json:"memory_total"`
-	DiskUsed      uint64    `json:"disk_used"`
-	DiskTotal     uint64    `json:"disk_total"`
-	NetRxBytes    uint64    `json:"net_rx_bytes"`
-	NetTxBytes    uint64    `json:"net_tx_bytes"`
+	CPUPercent  float64 `json:"cpu_percent"`
+	Load1       float64 `json:"load1"`
+	Load5       float64 `json:"load5"`
+	Load15      float64 `json:"load15"`
+	MemoryUsed  uint64  `json:"memory_used"`
+	MemoryTotal uint64  `json:"memory_total"`
+	DiskUsed    uint64  `json:"disk_used"`
+	DiskTotal   uint64  `json:"disk_total"`
+	NetRxBytes  uint64  `json:"net_rx_bytes"`
+	NetTxBytes  uint64  `json:"net_tx_bytes"`
+	// NetRxSpeed / NetTxSpeed are bytes-per-second rates the agent derives from
+	// the delta of the cumulative byte counters between two metrics cycles. The
+	// first cycle after agent start (no prior sample) and any counter reset both
+	// report 0. Dashboards read these for live bandwidth; the cumulative
+	// NetRxBytes/NetTxBytes remain the source of truth.
+	NetRxSpeed    float64   `json:"net_rx_speed"`
+	NetTxSpeed    float64   `json:"net_tx_speed"`
 	UptimeSeconds uint64    `json:"uptime_seconds"`
 	CollectedAt   time.Time `json:"collected_at"`
 }

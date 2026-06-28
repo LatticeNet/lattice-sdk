@@ -673,6 +673,38 @@ type ProxyUsageSnapshot struct {
 	CollectorCheckedAt time.Time `json:"collector_checked_at,omitempty"`
 }
 
+// SingBoxNode is one inbound discovered on a node by reading its on-box sing-box
+// management state (the 233boy `sb --json list` output). It is the adoption-model
+// view of a proxy that exists on the machine but is NOT (necessarily) managed by
+// Lattice's own proxy store — the bridge that lets the dashboard see proxies on
+// machines provisioned out-of-band. Secret-free: share_url already encodes the
+// connection without exposing additional server-side material.
+type SingBoxNode struct {
+	Name      string `json:"name"`
+	Protocol  string `json:"protocol,omitempty"`
+	Network   string `json:"network,omitempty"`
+	Address   string `json:"address,omitempty"`
+	Port      string `json:"port,omitempty"`
+	SNI       string `json:"sni,omitempty"`
+	Host      string `json:"host,omitempty"`
+	PublicKey string `json:"public_key,omitempty"`
+	ShareURL  string `json:"share_url,omitempty"`
+}
+
+// SingBoxInventory is the latest snapshot of the sing-box nodes discovered on one
+// machine. It is reported by the agent (read-only `sb --json list`) and held in
+// memory on the server as a live mirror — it is re-reported each interval and is
+// not persisted (a restart simply waits for the next report). Status/Error let a
+// node report a discovery failure (e.g. sb not installed) without a stale list.
+type SingBoxInventory struct {
+	NodeID      string        `json:"node_id"`
+	At          time.Time     `json:"at"`
+	CoreVersion string        `json:"core_version,omitempty"`
+	Nodes       []SingBoxNode `json:"nodes"`
+	Status      string        `json:"status,omitempty"` // ok | error
+	Error       string        `json:"error,omitempty"`
+}
+
 // NodeGeo is map metadata for a node. Operator-entered values are authoritative;
 // automatic GeoIP values are advisory and should not overwrite operator values
 // unless an operator explicitly asks for that replacement.

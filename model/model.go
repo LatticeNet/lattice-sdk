@@ -680,15 +680,20 @@ type ProxyUsageSnapshot struct {
 // machines provisioned out-of-band. Secret-free: share_url already encodes the
 // connection without exposing additional server-side material.
 type SingBoxNode struct {
-	Name      string `json:"name"`
-	Protocol  string `json:"protocol,omitempty"`
-	Network   string `json:"network,omitempty"`
-	Address   string `json:"address,omitempty"`
-	Port      string `json:"port,omitempty"`
-	SNI       string `json:"sni,omitempty"`
-	Host      string `json:"host,omitempty"`
-	PublicKey string `json:"public_key,omitempty"`
-	ShareURL  string `json:"share_url,omitempty"`
+	Name        string            `json:"name"`
+	Protocol    string            `json:"protocol,omitempty"`
+	Network     string            `json:"network,omitempty"`
+	Address     string            `json:"address,omitempty"`
+	Port        string            `json:"port,omitempty"`
+	SNI         string            `json:"sni,omitempty"`
+	Host        string            `json:"host,omitempty"`
+	ListenHost  string            `json:"listen_host,omitempty"`
+	OutboundRef string            `json:"outbound_ref,omitempty"`
+	UserCount   int               `json:"user_count,omitempty"`
+	UserKnown   bool              `json:"user_known,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+	PublicKey   string            `json:"public_key,omitempty"`
+	ShareURL    string            `json:"share_url,omitempty"`
 }
 
 // SingBoxInventory is the latest snapshot of the sing-box nodes discovered on one

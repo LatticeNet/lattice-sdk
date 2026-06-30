@@ -62,6 +62,7 @@ type Token struct {
 type Node struct {
 	ID                 string   `json:"id"`
 	Name               string   `json:"name"`
+	Comment            string   `json:"comment,omitempty"`
 	TokenHash          string   `json:"token_hash"`
 	Tags               []string `json:"tags"`
 	Role               string   `json:"role"`

@@ -83,6 +83,10 @@ type Node struct {
 	HostFacts    HostFacts        `json:"host_facts"`
 	Geo          *NodeGeo         `json:"geo,omitempty"`
 	AgentDebug   AgentDebugPolicy `json:"agent_debug"`
+	// AgentLaunch is the last operator-authored installer/startup profile used
+	// to generate an enrollment or reconfigure command. It is advisory desired
+	// state, not proof of the currently running process flags.
+	AgentLaunch *AgentLaunchConfig `json:"agent_launch,omitempty"`
 	// TerminalTransport is the operator-owned per-node terminal transport: "poll"
 	// (default) or "stream". Empty is treated as the deployment default. It is the
 	// rollout lever for promoting the streaming terminal one node at a time; the
@@ -121,6 +125,26 @@ type AgentDebugConfig struct {
 	Collect       bool `json:"collect"`
 	MaxLineBytes  int  `json:"max_line_bytes,omitempty"`
 	MaxBatchLines int  `json:"max_batch_lines,omitempty"`
+}
+
+// AgentLaunchConfig mirrors lattice-agent startup flags/env vars used by the
+// dashboard's enroll/reconfigure command generator. Runtime overrides that
+// already-running agents poll remain in AgentConfig instead.
+type AgentLaunchConfig struct {
+	AllowExec             bool      `json:"allow_exec"`
+	AllowRootExec         bool      `json:"allow_root_exec"`
+	NoExec                bool      `json:"no_exec"`
+	AllowTerminal         bool      `json:"allow_terminal"`
+	TerminalTransport     string    `json:"terminal_transport,omitempty"`
+	SSHAlerts             bool      `json:"ssh_alerts"`
+	SingBoxDiscover       bool      `json:"singbox_discover"`
+	SingBoxBin            string    `json:"singbox_bin,omitempty"`
+	ProxyUsageFile        string    `json:"proxy_usage_file,omitempty"`
+	ProxyUsageURL         string    `json:"proxy_usage_url,omitempty"`
+	ProxyUsageXrayAPI     string    `json:"proxy_usage_xray_api,omitempty"`
+	ProxyUsageXrayBin     string    `json:"proxy_usage_xray_bin,omitempty"`
+	ProxyUsageXrayPattern string    `json:"proxy_usage_xray_pattern,omitempty"`
+	UpdatedAt             time.Time `json:"updated_at,omitempty"`
 }
 
 type AgentConfig struct {
@@ -733,21 +757,29 @@ type NodeGeo struct {
 }
 
 type Task struct {
-	ID          string    `json:"id"`
-	ApprovalID  string    `json:"approval_id,omitempty"`
-	ActorID     string    `json:"actor_id"`
-	TokenID     string    `json:"token_id"`
-	Targets     []string  `json:"targets"`
-	Interpreter string    `json:"interpreter"`
-	Script      string    `json:"script"`
-	TimeoutSec  int       `json:"timeout_sec"`
-	OutputLimit int       `json:"output_limit"`
-	Status      string    `json:"status"`
-	LeaseID     string    `json:"lease_id,omitempty"`
-	LeasedBy    string    `json:"leased_by,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	StartedAt   time.Time `json:"started_at,omitempty"`
-	FinishedAt  time.Time `json:"finished_at,omitempty"`
+	ID            string               `json:"id"`
+	ApprovalID    string               `json:"approval_id,omitempty"`
+	ActorID       string               `json:"actor_id"`
+	TokenID       string               `json:"token_id"`
+	Targets       []string             `json:"targets"`
+	Interpreter   string               `json:"interpreter"`
+	Script        string               `json:"script"`
+	TimeoutSec    int                  `json:"timeout_sec"`
+	OutputLimit   int                  `json:"output_limit"`
+	Status        string               `json:"status"`
+	LeaseID       string               `json:"lease_id,omitempty"`
+	LeasedBy      string               `json:"leased_by,omitempty"`
+	TargetLeases  map[string]TaskLease `json:"target_leases,omitempty"`
+	RerunOfTaskID string               `json:"rerun_of_task_id,omitempty"`
+	RerunOfNodeID string               `json:"rerun_of_node_id,omitempty"`
+	CreatedAt     time.Time            `json:"created_at"`
+	StartedAt     time.Time            `json:"started_at,omitempty"`
+	FinishedAt    time.Time            `json:"finished_at,omitempty"`
+}
+
+type TaskLease struct {
+	LeaseID   string    `json:"lease_id"`
+	StartedAt time.Time `json:"started_at,omitempty"`
 }
 
 type TaskResult struct {

@@ -663,6 +663,11 @@ type ProxyUsageSnapshot struct {
 	At            time.Time        `json:"at"`
 	CoreUptimeSec uint64           `json:"core_uptime_sec"`
 	UserBytes     map[string]int64 `json:"user_bytes"`
+	// LineUserBytes optionally carries cumulative counters split by stable
+	// line_hash_id and proxy user id. It is additive to UserBytes so old
+	// collectors remain valid; if a collector sends only line_user_bytes, agents
+	// and servers may derive user_bytes by summing per-user line counters.
+	LineUserBytes map[string]map[string]int64 `json:"line_user_bytes,omitempty"`
 
 	// Collector fields describe this collection attempt. They let the agent
 	// report local collector errors without overwriting the previous accounting

@@ -868,6 +868,7 @@ const (
 	APIErrorRequestFailed    = "request_failed"
 
 	APIErrorCapabilityDenied        = "capability_denied"
+	APIErrorApprovalStale           = "approval_stale"
 	APIErrorInvalidNodeToken        = "invalid_node_token"
 	APIErrorInvalidTaskLease        = "invalid_task_lease"
 	APIErrorTaskOutputLimitExceeded = "task_output_limit_exceeded"

@@ -973,6 +973,7 @@ type Approval struct {
 	Action     string    `json:"action"`
 	Plan       string    `json:"plan"`
 	Status     string    `json:"status"`
+	Reason     string    `json:"reason,omitempty"`
 	ActorID    string    `json:"actor_id"`
 	ApprovedBy string    `json:"approved_by,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`

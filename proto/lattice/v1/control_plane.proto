@@ -124,6 +124,7 @@ message ApprovalView {
   string approved_by = 9;
   TimePoint created_at = 10;
   TimePoint updated_at = 11;
+  string reason = 12;
 }
 
 message ApproveRequest {

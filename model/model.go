@@ -975,11 +975,17 @@ type Approval struct {
 	Plan       string    `json:"plan"`
 	Status     string    `json:"status"`
 	Reason     string    `json:"reason,omitempty"`
+	Stale      bool      `json:"stale,omitempty"`
+	StaleCode  string    `json:"stale_code,omitempty"`
 	ActorID    string    `json:"actor_id"`
 	ApprovedBy string    `json:"approved_by,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
+
+const (
+	ApprovalStaleAgentUpdatePolicyChanged = "agent_update_policy_changed"
+)
 
 const (
 	DDNSProviderCloudflare = "cloudflare"

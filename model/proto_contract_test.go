@@ -66,6 +66,16 @@ func TestProtoContractsExistAndStayRedacted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	approvalView := messageBody(t, string(controlPlane), "ApprovalView")
+	for _, field := range []string{
+		"string reason = 12;",
+		"bool stale = 13;",
+		"string stale_code = 14;",
+	} {
+		if !strings.Contains(approvalView, field) {
+			t.Fatalf("ApprovalView missing field %s", field)
+		}
+	}
 	leasedTask := messageBody(t, string(agentProto), "LeasedTask")
 	for _, forbidden := range []string{"actor_id", "token_id", "target_node_ids", "profile", "script_sha256"} {
 		if strings.Contains(leasedTask, forbidden) {

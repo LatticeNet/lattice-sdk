@@ -52,6 +52,10 @@ Security-sensitive codes include `capability_denied`, `invalid_node_token`,
 `invalid_task_lease`, and `task_output_limit_exceeded`; approval workflow codes
 include `approval_stale` and `agent_update_noop`. Clients should treat these
 codes as stable automation signals and avoid branching on localized messages.
+Rendered approvals also expose machine-readable stale metadata: use
+`Approval.Stale` and `Approval.StaleCode` instead of parsing the operator-facing
+`Reason`. The agent-update stale code is
+`model.ApprovalStaleAgentUpdatePolicyChanged`.
 
 Agent authentication is transport metadata: node tokens belong in the
 `Authorization: Bearer` header and are intentionally absent from proto request

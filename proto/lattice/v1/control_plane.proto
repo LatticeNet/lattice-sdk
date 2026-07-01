@@ -125,6 +125,8 @@ message ApprovalView {
   TimePoint created_at = 10;
   TimePoint updated_at = 11;
   string reason = 12;
+  bool stale = 13;
+  string stale_code = 14;
 }
 
 message ApproveRequest {

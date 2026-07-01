@@ -49,8 +49,9 @@ filtered calls return `{events,total,limit,offset}`.
 The `model.APIError*` constants are the canonical JSON/proto code strings.
 `message` is public and may be deliberately generic for server-side failures.
 Security-sensitive codes include `capability_denied`, `invalid_node_token`,
-`invalid_task_lease`, and `task_output_limit_exceeded`; clients should treat
-them as stable automation signals.
+`invalid_task_lease`, and `task_output_limit_exceeded`; approval workflow codes
+include `approval_stale` and `agent_update_noop`. Clients should treat these
+codes as stable automation signals and avoid branching on localized messages.
 
 Agent authentication is transport metadata: node tokens belong in the
 `Authorization: Bearer` header and are intentionally absent from proto request

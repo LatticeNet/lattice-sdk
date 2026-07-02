@@ -24,10 +24,11 @@ github.com/LatticeNet/lattice-sdk
 
 `proto/lattice/v1` is the source of truth for the next API boundary:
 
-- `common.proto` - redacted views, metrics, HostFacts, MachineView,
-  NFTInputsView, DNSDeploymentView, NetPolicyView, NetPolicyGraph,
-  ProxyInboundView, ProxyUserView, ProxyNodeProfileView, ProxyUsageSnapshot,
-  paging, audit metadata.
+- `common.proto` - redacted views, live metrics, HostFacts, NodeView runtime
+  metadata, redacted NodeIPConfigView, MachineView, NFTInputsView,
+  DNSDeploymentView, NetPolicyView, NetPolicyGraph, ProxyInboundView,
+  ProxyUserView, ProxyNodeProfileView, ProxyUsageSnapshot, paging, audit
+  metadata.
 - `control_plane.proto` - dashboard/operator APIs.
 - `agent.proto` - node-agent polling, reporting, task leasing, monitor reporting.
 - `plugin.proto` - plugin manifests, capability risk, publisher identity,
@@ -84,7 +85,10 @@ then generate Go/TypeScript bindings in a later Buf/protoc step.
 The contract test rejects secret storage fields such as token/password hashes,
 provider credentials, MachineProfile console/detail links, full task script
 bodies in control-plane responses, and control-plane metadata in agent
-leased-task payloads.
+leased-task payloads. Node IP discovery overrides are represented by a
+redacted `NodeIPConfigView`: clients can confirm `mode`, static IPs, resolvers,
+and `script_sha256`, but never receive the script body from a read-facing node
+view.
 
 ## Development
 

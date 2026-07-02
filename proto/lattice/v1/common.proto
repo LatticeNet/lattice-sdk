@@ -20,6 +20,10 @@ message Metrics {
   uint64 net_tx_bytes = 8;
   uint64 uptime_seconds = 9;
   TimePoint collected_at = 10;
+  double load5 = 11;
+  double load15 = 12;
+  double net_rx_speed = 13;
+  double net_tx_speed = 14;
 }
 
 message HostFacts {
@@ -49,6 +53,21 @@ message NodeGeo {
   TimePoint updated_at = 8;
 }
 
+message AgentDebugPolicy {
+  bool enabled = 1;
+  bool collect = 2;
+  TimePoint updated_at = 3;
+}
+
+message NodeIPConfigView {
+  string mode = 1;
+  string static_ipv4 = 2;
+  string static_ipv6 = 3;
+  repeated string resolvers = 4;
+  string script_sha256 = 5;
+  TimePoint updated_at = 6;
+}
+
 message NodeView {
   string id = 1;
   string name = 2;
@@ -67,6 +86,13 @@ message NodeView {
   TimePoint created_at = 15;
   HostFacts host_facts = 16;
   NodeGeo geo = 17;
+  string comment = 18;
+  string internal_ip = 19;
+  string internal_ipv6 = 20;
+  bool disabled = 21;
+  AgentDebugPolicy agent_debug = 22;
+  NodeIPConfigView ip_config = 23;
+  repeated string group_ids = 24;
 }
 
 message MachineView {

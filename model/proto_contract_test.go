@@ -84,6 +84,8 @@ func TestProtoContractsExistAndStayRedacted(t *testing.T) {
 	}
 	for _, msg := range []string{
 		"message NodeView",
+		"message AgentDebugPolicy",
+		"message NodeIPConfigView",
 		"message MachineView",
 		"message NFTInputsView",
 		"message DNSDeploymentView",
@@ -120,6 +122,47 @@ func TestProtoContractsExistAndStayRedacted(t *testing.T) {
 	common, err := os.ReadFile(filepath.Join(root, "common.proto"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	metrics := messageBody(t, string(common), "Metrics")
+	for _, field := range []string{
+		"double load5 = 11;",
+		"double load15 = 12;",
+		"double net_rx_speed = 13;",
+		"double net_tx_speed = 14;",
+	} {
+		if !strings.Contains(metrics, field) {
+			t.Fatalf("Metrics missing field %s", field)
+		}
+	}
+	nodeView := messageBody(t, string(common), "NodeView")
+	for _, field := range []string{
+		"string comment = 18;",
+		"string internal_ip = 19;",
+		"string internal_ipv6 = 20;",
+		"bool disabled = 21;",
+		"AgentDebugPolicy agent_debug = 22;",
+		"NodeIPConfigView ip_config = 23;",
+		"repeated string group_ids = 24;",
+	} {
+		if !strings.Contains(nodeView, field) {
+			t.Fatalf("NodeView missing field %s", field)
+		}
+	}
+	nodeIPConfigView := messageBody(t, string(common), "NodeIPConfigView")
+	if strings.Contains(nodeIPConfigView, " script =") {
+		t.Fatal("NodeIPConfigView exposes forbidden script body")
+	}
+	for _, field := range []string{
+		"string mode = 1;",
+		"string static_ipv4 = 2;",
+		"string static_ipv6 = 3;",
+		"repeated string resolvers = 4;",
+		"string script_sha256 = 5;",
+		"TimePoint updated_at = 6;",
+	} {
+		if !strings.Contains(nodeIPConfigView, field) {
+			t.Fatalf("NodeIPConfigView missing field %s", field)
+		}
 	}
 	apiError := messageBody(t, string(common), "ApiError")
 	for _, field := range []string{"string code = 1;", "string message = 2;", "string request_id = 3;"} {

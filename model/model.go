@@ -878,6 +878,7 @@ const (
 	APIErrorCapabilityDenied        = "capability_denied"
 	APIErrorApprovalStale           = "approval_stale"
 	APIErrorAgentUpdateNoop         = "agent_update_noop"
+	APIErrorMFARequired             = "mfa_required"
 	APIErrorInvalidNodeToken        = "invalid_node_token"
 	APIErrorInvalidTaskLease        = "invalid_task_lease"
 	APIErrorTaskOutputLimitExceeded = "task_output_limit_exceeded"

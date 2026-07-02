@@ -79,6 +79,10 @@ type Node struct {
 	AgentVersion string `json:"agent_version"`
 	Online       bool   `json:"online"`
 	Disabled     bool   `json:"disabled,omitempty"`
+	// AgentSourceAllowlist optionally restricts node-agent bearer-token use to
+	// exact source IPs or CIDR prefixes as resolved by the server's client-IP
+	// trust policy. Empty means no source-address restriction.
+	AgentSourceAllowlist []string `json:"agent_source_allowlist,omitempty"`
 	// TokenLastUsedAt is coarse lifecycle telemetry for the node credential. It
 	// is updated only after successful bearer-token authentication and may be
 	// write-throttled by the server to avoid heartbeat write amplification.

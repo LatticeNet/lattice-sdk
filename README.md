@@ -60,7 +60,9 @@ Rendered approvals also expose machine-readable stale metadata: use
 
 Agent authentication is transport metadata: node tokens belong in the
 `Authorization: Bearer` header and are intentionally absent from proto request
-messages.
+messages. Node views may expose `token_last_used_at` as coarse credential
+lifecycle telemetry; clients must treat it as advisory because servers may
+write-throttle it to avoid heartbeat write amplification.
 
 `DNSDeploymentView` intentionally separates CoreDNS/nft service apply status
 (`last_applied_at` / `last_error`) from Cloudflare hostname publication status

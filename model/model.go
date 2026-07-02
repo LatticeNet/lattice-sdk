@@ -74,16 +74,20 @@ type Node struct {
 	PublicIPv6         string   `json:"public_ipv6,omitempty"`
 	// InternalIP / InternalIPv6 are the node's LAN/primary-interface addresses,
 	// reported by the agent. Informational (not geocoded); private ranges allowed.
-	InternalIP   string           `json:"internal_ip,omitempty"`
-	InternalIPv6 string           `json:"internal_ipv6,omitempty"`
-	AgentVersion string           `json:"agent_version"`
-	Online       bool             `json:"online"`
-	Disabled     bool             `json:"disabled,omitempty"`
-	LastSeen     time.Time        `json:"last_seen"`
-	Metrics      Metrics          `json:"metrics"`
-	HostFacts    HostFacts        `json:"host_facts"`
-	Geo          *NodeGeo         `json:"geo,omitempty"`
-	AgentDebug   AgentDebugPolicy `json:"agent_debug"`
+	InternalIP   string `json:"internal_ip,omitempty"`
+	InternalIPv6 string `json:"internal_ipv6,omitempty"`
+	AgentVersion string `json:"agent_version"`
+	Online       bool   `json:"online"`
+	Disabled     bool   `json:"disabled,omitempty"`
+	// TokenLastUsedAt is coarse lifecycle telemetry for the node credential. It
+	// is updated only after successful bearer-token authentication and may be
+	// write-throttled by the server to avoid heartbeat write amplification.
+	TokenLastUsedAt time.Time        `json:"token_last_used_at,omitempty"`
+	LastSeen        time.Time        `json:"last_seen"`
+	Metrics         Metrics          `json:"metrics"`
+	HostFacts       HostFacts        `json:"host_facts"`
+	Geo             *NodeGeo         `json:"geo,omitempty"`
+	AgentDebug      AgentDebugPolicy `json:"agent_debug"`
 	// AgentLaunch is the last operator-authored installer/startup profile used
 	// to generate an enrollment or reconfigure command. It is advisory desired
 	// state, not proof of the currently running process flags.

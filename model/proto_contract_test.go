@@ -145,6 +145,7 @@ func TestProtoContractsExistAndStayRedacted(t *testing.T) {
 		"repeated string group_ids = 24;",
 		"TimePoint token_last_used_at = 25;",
 		"repeated string agent_source_allowlist = 26;",
+		"string lattice_identity_uuid = 27;",
 	} {
 		if !strings.Contains(nodeView, field) {
 			t.Fatalf("NodeView missing field %s", field)

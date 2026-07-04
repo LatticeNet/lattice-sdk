@@ -60,18 +60,19 @@ type Token struct {
 }
 
 type Node struct {
-	ID                 string   `json:"id"`
-	Name               string   `json:"name"`
-	Comment            string   `json:"comment,omitempty"`
-	TokenHash          string   `json:"token_hash"`
-	Tags               []string `json:"tags"`
-	Role               string   `json:"role"`
-	WireGuardIP        string   `json:"wireguard_ip"`
-	WireGuardPublicKey string   `json:"wireguard_public_key,omitempty"`
-	WireGuardEndpoint  string   `json:"wireguard_endpoint,omitempty"`
-	WireGuardPort      int      `json:"wireguard_port,omitempty"`
-	PublicIP           string   `json:"public_ip"`
-	PublicIPv6         string   `json:"public_ipv6,omitempty"`
+	ID                  string   `json:"id"`
+	LatticeIdentityUUID string   `json:"lattice_identity_uuid,omitempty"`
+	Name                string   `json:"name"`
+	Comment             string   `json:"comment,omitempty"`
+	TokenHash           string   `json:"token_hash"`
+	Tags                []string `json:"tags"`
+	Role                string   `json:"role"`
+	WireGuardIP         string   `json:"wireguard_ip"`
+	WireGuardPublicKey  string   `json:"wireguard_public_key,omitempty"`
+	WireGuardEndpoint   string   `json:"wireguard_endpoint,omitempty"`
+	WireGuardPort       int      `json:"wireguard_port,omitempty"`
+	PublicIP            string   `json:"public_ip"`
+	PublicIPv6          string   `json:"public_ipv6,omitempty"`
 	// InternalIP / InternalIPv6 are the node's LAN/primary-interface addresses,
 	// reported by the agent. Informational (not geocoded); private ranges allowed.
 	InternalIP   string `json:"internal_ip,omitempty"`
@@ -158,6 +159,10 @@ type AgentLaunchConfig struct {
 
 type AgentConfig struct {
 	Debug AgentDebugConfig `json:"debug"`
+	// LatticeIdentityUUID is the server-minted, stable node identity used by
+	// line discovery metadata and cross-node line graph resolution. Empty means
+	// the server has not minted one yet; old agents ignore this field.
+	LatticeIdentityUUID string `json:"lattice_identity_uuid,omitempty"`
 	// TerminalTransport is the server's per-node override for the agent terminal
 	// transport: "poll" or "stream". Empty means "no override" — the agent keeps
 	// its startup -terminal-transport / LATTICE_TERMINAL_TRANSPORT value. This is
@@ -718,20 +723,22 @@ type ProxyUsageSnapshot struct {
 // machines provisioned out-of-band. Secret-free: share_url already encodes the
 // connection without exposing additional server-side material.
 type SingBoxNode struct {
-	Name        string            `json:"name"`
-	Protocol    string            `json:"protocol,omitempty"`
-	Network     string            `json:"network,omitempty"`
-	Address     string            `json:"address,omitempty"`
-	Port        string            `json:"port,omitempty"`
-	SNI         string            `json:"sni,omitempty"`
-	Host        string            `json:"host,omitempty"`
-	ListenHost  string            `json:"listen_host,omitempty"`
-	OutboundRef string            `json:"outbound_ref,omitempty"`
-	UserCount   int               `json:"user_count,omitempty"`
-	UserKnown   bool              `json:"user_known,omitempty"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
-	PublicKey   string            `json:"public_key,omitempty"`
-	ShareURL    string            `json:"share_url,omitempty"`
+	Name             string            `json:"name"`
+	LineID           string            `json:"line_id,omitempty"`
+	NodeIdentityUUID string            `json:"node_identity_uuid,omitempty"`
+	Protocol         string            `json:"protocol,omitempty"`
+	Network          string            `json:"network,omitempty"`
+	Address          string            `json:"address,omitempty"`
+	Port             string            `json:"port,omitempty"`
+	SNI              string            `json:"sni,omitempty"`
+	Host             string            `json:"host,omitempty"`
+	ListenHost       string            `json:"listen_host,omitempty"`
+	OutboundRef      string            `json:"outbound_ref,omitempty"`
+	UserCount        int               `json:"user_count,omitempty"`
+	UserKnown        bool              `json:"user_known,omitempty"`
+	Metadata         map[string]string `json:"metadata,omitempty"`
+	PublicKey        string            `json:"public_key,omitempty"`
+	ShareURL         string            `json:"share_url,omitempty"`
 }
 
 // SingBoxInventory is the latest snapshot of the sing-box nodes discovered on one

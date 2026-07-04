@@ -67,12 +67,15 @@ type Node struct {
 	TokenHash           string   `json:"token_hash"`
 	Tags                []string `json:"tags"`
 	Role                string   `json:"role"`
-	WireGuardIP         string   `json:"wireguard_ip"`
-	WireGuardPublicKey  string   `json:"wireguard_public_key,omitempty"`
-	WireGuardEndpoint   string   `json:"wireguard_endpoint,omitempty"`
-	WireGuardPort       int      `json:"wireguard_port,omitempty"`
-	PublicIP            string   `json:"public_ip"`
-	PublicIPv6          string   `json:"public_ipv6,omitempty"`
+	// Inventory is operator-registered provenance/quality metadata (dashboard
+	// fleet inventory). Operator-owned; agents never report or overwrite it.
+	Inventory          *NodeInventory `json:"inventory,omitempty"`
+	WireGuardIP        string         `json:"wireguard_ip"`
+	WireGuardPublicKey string         `json:"wireguard_public_key,omitempty"`
+	WireGuardEndpoint  string         `json:"wireguard_endpoint,omitempty"`
+	WireGuardPort      int            `json:"wireguard_port,omitempty"`
+	PublicIP           string         `json:"public_ip"`
+	PublicIPv6         string         `json:"public_ipv6,omitempty"`
 	// InternalIP / InternalIPv6 are the node's LAN/primary-interface addresses,
 	// reported by the agent. Informational (not geocoded); private ranges allowed.
 	InternalIP   string `json:"internal_ip,omitempty"`
@@ -770,6 +773,19 @@ type NodeGeo struct {
 	Provider  string    `json:"provider,omitempty"`
 	Source    string    `json:"source,omitempty"`
 	UpdatedAt time.Time `json:"updated_at,omitempty"`
+}
+
+// NodeInventory carries the operator's own assessment of a node's provenance
+// quality — e.g. "98% pure, high quality" residential/ISP purity notes kept in
+// the fleet inventory. Purely informational; nothing in the control plane
+// branches on it.
+type NodeInventory struct {
+	// PurityPercent is the operator-assessed IP purity score, 0-100.
+	PurityPercent *int `json:"purity_percent,omitempty"`
+	// Quality is a coarse grade such as "high", "medium", "low" (free-form, <=64 chars).
+	Quality string `json:"quality,omitempty"`
+	// Notes is free-form inventory context (<=2048 chars, matching MachineProfile.Notes).
+	Notes string `json:"notes,omitempty"`
 }
 
 type Task struct {

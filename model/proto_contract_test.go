@@ -96,6 +96,7 @@ func TestProtoContractsExistAndStayRedacted(t *testing.T) {
 		"message ProxyNodeProfileView",
 		"message ProxyUsageSnapshot",
 		"message NodeGeo",
+		"message NodeInventory",
 		"message AgentEnvelope",
 		"message PluginManifest",
 		"enum CapabilityRisk",
@@ -146,6 +147,7 @@ func TestProtoContractsExistAndStayRedacted(t *testing.T) {
 		"TimePoint token_last_used_at = 25;",
 		"repeated string agent_source_allowlist = 26;",
 		"string lattice_identity_uuid = 27;",
+		"NodeInventory inventory = 28;",
 	} {
 		if !strings.Contains(nodeView, field) {
 			t.Fatalf("NodeView missing field %s", field)

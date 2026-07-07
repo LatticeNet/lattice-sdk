@@ -501,14 +501,15 @@ type NetPolicy struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-// Group is a first-class fleet organization entity. A node's policy-relevant
-// membership is the explicit Members list (the canonical source of truth);
-// Selector is a display-only "smart filter" used to suggest/filter on the
-// dashboard and to seed groups during migration — it never silently changes a
-// firewall. Color is a design-token name (e.g. "sky", "violet"), never a raw
-// hex value, so the dashboard stays CSP-safe. Slug is url/nft-safe, unique, and
-// treated as immutable once assigned. ParentID gives a single-parent hierarchy
-// ("" = root); Order is the operator-controlled sort weight within a parent.
+// Group is a first-class fleet organization entity. Members are explicit,
+// operator-pinned node IDs; Selector is a dynamic smart-membership source used by
+// dashboard grouping and group policy planning. Because selector matches can
+// change when node tags, role, or geo facts change, group-policy plans must
+// surface selector impact and require fresh approval. Color is a design-token
+// name (e.g. "sky", "violet"), never a raw hex value, so the dashboard stays
+// CSP-safe. Slug is url/nft-safe, unique, and treated as immutable once assigned.
+// ParentID gives a single-parent hierarchy ("" = root); Order is the
+// operator-controlled sort weight within a parent.
 type Group struct {
 	ID          string         `json:"id"`   // "grp_<ulid>"
 	Name        string         `json:"name"` // unique, display
@@ -518,8 +519,8 @@ type Group struct {
 	Icon        string         `json:"icon,omitempty"`      // lucide icon name
 	ParentID    string         `json:"parent_id,omitempty"` // single parent; "" = root
 	Order       int            `json:"order"`               // sort weight within the parent
-	Members     []string       `json:"members"`             // explicit node IDs — the CANONICAL membership
-	Selector    *GroupSelector `json:"selector,omitempty"`  // DISPLAY-ONLY smart filter, not a policy input
+	Members     []string       `json:"members"`             // explicit operator-pinned node IDs
+	Selector    *GroupSelector `json:"selector,omitempty"`  // dynamic smart-membership source
 	// LeaderID is the operator-designated group leader. It must be an explicit
 	// Member of the group (validated on upsert); empty means "no leader". This is
 	// the real, first-class field that replaces the old role-name heuristic used
@@ -530,11 +531,11 @@ type Group struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// GroupSelector is a read-only "smart group" used only for dashboard filtering
-// and migration seeding. It is NOT a policy input: the compiler never reads it,
-// so a spoofed tag can mis-scope display but cannot bypass per-node nft. Each
-// field is an OR-set; a node matches the selector when it satisfies any one of
-// the populated criteria (tags-any / roles / country / continent).
+// GroupSelector is a dynamic "smart group" membership rule. Dashboard grouping
+// uses it for previews, and group-policy planning uses the current match set
+// when expanding policies into per-node nft plans. Each field is an OR-set; a
+// node matches the selector when it satisfies any one of the populated criteria
+// (tags-any / roles / country / continent).
 type GroupSelector struct {
 	MatchTagsAny   []string `json:"match_tags_any,omitempty"`
 	MatchRoles     []string `json:"match_roles,omitempty"`

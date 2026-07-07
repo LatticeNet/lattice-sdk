@@ -738,6 +738,9 @@ type SingBoxNode struct {
 	Host             string            `json:"host,omitempty"`
 	ListenHost       string            `json:"listen_host,omitempty"`
 	OutboundRef      string            `json:"outbound_ref,omitempty"`
+	OutboundServer   string            `json:"outbound_server,omitempty"`
+	OutboundPort     string            `json:"outbound_port,omitempty"`
+	OutboundType     string            `json:"outbound_type,omitempty"`
 	UserCount        int               `json:"user_count,omitempty"`
 	UserKnown        bool              `json:"user_known,omitempty"`
 	Metadata         map[string]string `json:"metadata,omitempty"`

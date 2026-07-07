@@ -300,6 +300,7 @@ type MachineProfile struct {
 	PriceCents int64  `json:"price_cents,omitempty"`
 	Currency   string `json:"currency,omitempty"`
 
+	PurchasedAt  time.Time `json:"purchased_at,omitempty"`
 	RenewalCycle string    `json:"renewal_cycle,omitempty"`
 	CycleDays    int       `json:"cycle_days,omitempty"`
 	NextRenewal  time.Time `json:"next_renewal,omitempty"`

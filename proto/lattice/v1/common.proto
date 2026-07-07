@@ -127,6 +127,7 @@ message MachineView {
   repeated int32 remind_days_before = 19;
   bool reminders_enabled = 20;
   TimePoint updated_at = 21;
+  TimePoint purchased_at = 22;
 }
 
 message NFTInputsView {

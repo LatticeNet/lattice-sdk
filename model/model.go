@@ -314,6 +314,19 @@ type MachineProfile struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// MachineVendor is operator-authored metadata for a provider/vendor referenced
+// by machine profiles. MachineProfile.Vendor remains the compatibility key; the
+// server matches this record by Name so old profiles do not require migration.
+type MachineVendor struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	URL         string    `json:"url,omitempty"`
+	LogoURL     string    `json:"logo_url,omitempty"`
+	Description string    `json:"description,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 // NFTInputs are the authoritative, server-owned baseline nftables inputs for a
 // single node. Other core providers (DNS, per-node ACL, proxy cores) compose
 // their required ports/rules into this shape before rendering the one

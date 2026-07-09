@@ -480,6 +480,7 @@ type NetEndpoint struct {
 	CIDR    string `json:"cidr,omitempty"`
 	Domain  string `json:"domain,omitempty"`
 	GroupID string `json:"group_id,omitempty"` // set when Kind == NetRefGroup; resolved to node refs before compile
+	ZoneID  string `json:"zone_id,omitempty"`  // set when Kind == NetRefZone; resolved to iface/CIDR matches before compile
 }
 
 // NetRule is an ordered operator-authored L3/L4 policy rule evaluated on the
@@ -585,6 +586,129 @@ type GroupNetRule struct {
 	Ports     []int       `json:"ports,omitempty"`
 	Remote    NetEndpoint `json:"remote"` // Kind may be NetRefGroup in addition to node|cidr|domain|any
 	Disabled  bool        `json:"disabled,omitempty"`
+}
+
+const (
+	// NetRefZone is a guard-zone-scoped remote (design-13). Like NetRefGroup it
+	// is an authoring-layer kind: the server resolves the zone to concrete
+	// interface/CIDR matches before the per-node nft compiler runs.
+	NetRefZone = "zone"
+
+	GuardProtoICMP   = "icmp"
+	GuardProtoICMPv6 = "icmpv6"
+
+	// Builtin guard-zone ids. "public" resolves to the node's public-facing
+	// interface, "loopback" is the always-accepted lo scaffold, and overlay
+	// zones ("wireguard", "tailscale") resolve to the node's discovered or
+	// managed overlay interfaces/CIDRs.
+	GuardZonePublic    = "public"
+	GuardZoneLoopback  = "loopback"
+	GuardZoneWireGuard = "wireguard"
+	GuardZoneTailscale = "tailscale"
+)
+
+// GuardPortRange is an inclusive L4 port range; From == To expresses a single
+// port. Security-group rules use ranges instead of bare port lists so
+// "9009-9013" stays one reviewable entry (design-13 §4.2).
+type GuardPortRange struct {
+	From int `json:"from"`
+	To   int `json:"to"`
+}
+
+// GuardZone is a named trust surface built from interface names and/or CIDRs.
+// Builtin zones carry well-known ids (GuardZone* constants) and resolve
+// per-node facts (public interface, overlay membership) at compile/view time;
+// operator zones pin explicit interfaces/CIDRs. Zone references appear both as
+// a rule remote (match scope) and as a node binding's trusted-zone list (full
+// accept), reviewed like every other plan input. (design-13 §4.1)
+type GuardZone struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Builtin     bool      `json:"builtin,omitempty"`
+	Interfaces  []string  `json:"interfaces,omitempty"`
+	CIDRs       []string  `json:"cidrs,omitempty"`
+	Description string    `json:"description,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// GuardRule is one ordered security-group rule. Empty Ports means all ports
+// for the selected protocol. RateLimit and Log are L2 render surfaces
+// (design-13 §4.6): the fields are part of the stable wire contract now and
+// are rendered only once the corresponding compiler slice lands.
+type GuardRule struct {
+	ID        string           `json:"id"`
+	Comment   string           `json:"comment,omitempty"`
+	Action    string           `json:"action"`    // allow | deny
+	Direction string           `json:"direction"` // ingress | egress
+	Protocol  string           `json:"protocol"`  // tcp | udp | icmp | icmpv6 | any
+	Ports     []GuardPortRange `json:"ports,omitempty"`
+	Remote    NetEndpoint      `json:"remote"` // Kind may additionally be NetRefZone
+	RateLimit string           `json:"rate_limit,omitempty"`
+	Log       bool             `json:"log,omitempty"`
+	Disabled  bool             `json:"disabled,omitempty"`
+}
+
+// SecurityGroup is a named, reusable, ordered rule set attachable to any
+// number of nodes through NodeGuardBinding. Version implements optimistic
+// concurrency on upserts so two operators cannot silently clobber each other
+// (design-13 §4.2, closing the NFTInputs gap).
+type SecurityGroup struct {
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Description string      `json:"description,omitempty"`
+	Rules       []GuardRule `json:"rules"`
+	Version     int64       `json:"version"`
+	CreatedAt   time.Time   `json:"created_at"`
+	UpdatedAt   time.Time   `json:"updated_at"`
+}
+
+// NodeGuardBinding composes a node's effective firewall: base scaffold, then
+// trusted zones, then Overrides, then attached groups in GroupIDs order.
+// Managed=false marks an observe-only node the compiler must refuse to plan.
+// The Last*/AppliedTableSHA fields carry apply state and the drift anchor the
+// legacy NFTInputs record never had (design-13 §4.2).
+type NodeGuardBinding struct {
+	NodeID          string      `json:"node_id"`
+	GroupIDs        []string    `json:"group_ids"`
+	Overrides       []GuardRule `json:"overrides,omitempty"`
+	ZoneIDs         []string    `json:"zone_ids,omitempty"`
+	Managed         bool        `json:"managed"`
+	Version         int64       `json:"version"`
+	LastPlanSHA     string      `json:"last_plan_sha,omitempty"`
+	LastAppliedAt   time.Time   `json:"last_applied_at,omitempty"`
+	LastError       string      `json:"last_error,omitempty"`
+	AppliedTableSHA string      `json:"applied_table_sha,omitempty"`
+	CreatedAt       time.Time   `json:"created_at"`
+	UpdatedAt       time.Time   `json:"updated_at"`
+}
+
+// GuardListener is one listening socket from a node reality report.
+type GuardListener struct {
+	Protocol string `json:"protocol"` // tcp | udp
+	Port     int    `json:"port"`
+	Address  string `json:"address,omitempty"`
+	Process  string `json:"process,omitempty"`
+}
+
+// GuardInterface is one network interface from a node reality report.
+type GuardInterface struct {
+	Name      string   `json:"name"`
+	Addresses []string `json:"addresses,omitempty"`
+	Up        bool     `json:"up,omitempty"`
+}
+
+// GuardNodeReality is the agent-reported ground truth for reality-first
+// authoring and drift detection (design-13 §4.3). It is low-trust input: it
+// feeds suggestions, diffs, and display only — never silent policy.
+type GuardNodeReality struct {
+	NodeID        string           `json:"node_id"`
+	Listeners     []GuardListener  `json:"listeners,omitempty"`
+	Interfaces    []GuardInterface `json:"interfaces,omitempty"`
+	ManagedSHA    string           `json:"managed_sha,omitempty"`
+	ForeignTables []string         `json:"foreign_tables,omitempty"`
+	NFTVersion    string           `json:"nft_version,omitempty"`
+	CollectedAt   time.Time        `json:"collected_at"`
 }
 
 const (

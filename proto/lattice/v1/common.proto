@@ -192,6 +192,126 @@ message NetEndpoint {
   string node_id = 2;
   string cidr = 3;
   string domain = 4;
+  string zone_id = 5;
+}
+
+message GuardPortRange {
+  uint32 from = 1;
+  uint32 to = 2;
+}
+
+message GuardZone {
+  string id = 1;
+  string name = 2;
+  bool builtin = 3;
+  repeated string interfaces = 4;
+  repeated string cidrs = 5;
+  string description = 6;
+  TimePoint created_at = 7;
+  TimePoint updated_at = 8;
+}
+
+message GuardRule {
+  string id = 1;
+  string comment = 2;
+  string action = 3;
+  string direction = 4;
+  string protocol = 5;
+  repeated GuardPortRange ports = 6;
+  NetEndpoint remote = 7;
+  bool log = 8;
+  bool disabled = 9;
+}
+
+message SecurityGroup {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  repeated GuardRule rules = 4;
+  int64 version = 5;
+  TimePoint created_at = 6;
+  TimePoint updated_at = 7;
+}
+
+message NodeGuardBinding {
+  string node_id = 1;
+  repeated string group_ids = 2;
+  repeated GuardRule overrides = 3;
+  repeated string zone_ids = 4;
+  bool managed = 5;
+  int64 version = 6;
+  string last_plan_sha = 7;
+  TimePoint last_applied_at = 8;
+  string last_error = 9;
+  string applied_table_sha = 10;
+  TimePoint created_at = 11;
+  TimePoint updated_at = 12;
+}
+
+message GuardListener {
+  string protocol = 1;
+  uint32 port = 2;
+  string address = 3;
+  string process = 4;
+}
+
+message GuardInterface {
+  string name = 1;
+  repeated string addresses = 2;
+  bool up = 3;
+}
+
+message GuardNodeReality {
+  string node_id = 1;
+  repeated GuardListener listeners = 2;
+  repeated GuardInterface interfaces = 3;
+  string managed_sha = 4;
+  repeated string foreign_tables = 5;
+  string nft_version = 6;
+  TimePoint collected_at = 7;
+}
+
+message WGNetwork {
+  string id = 1;
+  string name = 2;
+  string cidr = 3;
+  string topology = 4;
+  uint32 listen_port = 5;
+  uint32 keepalive = 6;
+  uint32 mtu = 7;
+  repeated string dns = 8;
+  string description = 9;
+  int64 version = 10;
+  TimePoint created_at = 11;
+  TimePoint updated_at = 12;
+}
+
+message WGMembership {
+  string network_id = 1;
+  string node_id = 2;
+  string address = 3;
+  string role = 4;
+  string interface_name = 5;
+  uint32 listen_port = 6;
+  string endpoint = 7;
+  uint32 keepalive = 8;
+  uint32 mtu = 9;
+  repeated string extra_allowed_ips = 10;
+  int64 version = 11;
+  TimePoint created_at = 12;
+  TimePoint updated_at = 13;
+}
+
+message WGExternalPeer {
+  string id = 1;
+  string network_id = 2;
+  string name = 3;
+  string address = 4;
+  string public_key = 5;
+  repeated string allowed_ips = 6;
+  TimePoint last_issued_at = 7;
+  TimePoint created_at = 8;
+  TimePoint updated_at = 9;
 }
 
 message NetRule {

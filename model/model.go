@@ -712,6 +712,78 @@ type GuardNodeReality struct {
 }
 
 const (
+	// WireGuard topology modes (design-13 §5.3). Mesh is today's implicit
+	// behavior; hub-and-spoke and custom are additive.
+	WGTopologyMesh     = "mesh"
+	WGTopologyHubSpoke = "hub-and-spoke"
+	WGTopologyCustom   = "custom"
+
+	WGRoleHub   = "hub"
+	WGRoleSpoke = "spoke"
+	WGRolePeer  = "peer"
+
+	WGDefaultListenPort = 51820
+	WGDefaultKeepalive  = 25
+)
+
+// WGNetwork is a named WireGuard network. A fleet may run several; a node may
+// belong to more than one (one interface per membership).
+type WGNetwork struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	CIDR        string   `json:"cidr"`
+	Topology    string   `json:"topology"` // mesh | hub-and-spoke | custom
+	ListenPort  int      `json:"listen_port,omitempty"`
+	Keepalive   int      `json:"keepalive,omitempty"`
+	MTU         int      `json:"mtu,omitempty"`
+	DNS         []string `json:"dns,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Version     int64    `json:"version"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// WGMembership binds a node into a network. Address is server-allocated from
+// the network CIDR and always pinned to a host route when it becomes a peer's
+// AllowedIPs, so a member can never claim another member's address.
+// ExtraAllowedIPs are additive routes a hub advertises (a LAN CIDR, or
+// 0.0.0.0/0 for an exit node); they are reviewed in the plan like any other
+// mutation and may never widen another member's pinned address.
+type WGMembership struct {
+	NetworkID       string   `json:"network_id"`
+	NodeID          string   `json:"node_id"`
+	Address         string   `json:"address"`
+	Role            string   `json:"role"` // hub | spoke | peer
+	InterfaceName   string   `json:"interface_name,omitempty"`
+	ListenPort      int      `json:"listen_port,omitempty"`
+	Endpoint        string   `json:"endpoint,omitempty"`
+	Keepalive       int      `json:"keepalive,omitempty"`
+	MTU             int      `json:"mtu,omitempty"`
+	ExtraAllowedIPs []string `json:"extra_allowed_ips,omitempty"`
+	Version         int64    `json:"version"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// WGExternalPeer is a non-node device (laptop, phone). Its private key is
+// generated server-side, rendered once for the operator, and never persisted:
+// only the public key and metadata survive. Regeneration mints a new key and
+// invalidates the old config.
+type WGExternalPeer struct {
+	ID           string    `json:"id"`
+	NetworkID    string    `json:"network_id"`
+	Name         string    `json:"name"`
+	Address      string    `json:"address"`
+	PublicKey    string    `json:"public_key"`
+	AllowedIPs   []string  `json:"allowed_ips,omitempty"`
+	LastIssuedAt time.Time `json:"last_issued_at,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+const (
 	ProxyCoreSingbox = "sing-box"
 	ProxyCoreXray    = "xray"
 

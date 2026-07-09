@@ -633,9 +633,9 @@ type GuardZone struct {
 }
 
 // GuardRule is one ordered security-group rule. Empty Ports means all ports
-// for the selected protocol. RateLimit and Log are L2 render surfaces
-// (design-13 §4.6): the fields are part of the stable wire contract now and
-// are rendered only once the corresponding compiler slice lands.
+// for the selected protocol. Log is an L2 render surface (design-13 §4.6):
+// the field is part of the authoring contract now, but the compiler rejects it
+// until renderer support lands.
 type GuardRule struct {
 	ID        string           `json:"id"`
 	Comment   string           `json:"comment,omitempty"`
@@ -644,7 +644,6 @@ type GuardRule struct {
 	Protocol  string           `json:"protocol"`  // tcp | udp | icmp | icmpv6 | any
 	Ports     []GuardPortRange `json:"ports,omitempty"`
 	Remote    NetEndpoint      `json:"remote"` // Kind may additionally be NetRefZone
-	RateLimit string           `json:"rate_limit,omitempty"`
 	Log       bool             `json:"log,omitempty"`
 	Disabled  bool             `json:"disabled,omitempty"`
 }
@@ -751,12 +750,14 @@ type WGNetwork struct {
 // 0.0.0.0/0 for an exit node); they are reviewed in the plan like any other
 // mutation and may never widen another member's pinned address.
 type WGMembership struct {
-	NetworkID       string   `json:"network_id"`
-	NodeID          string   `json:"node_id"`
-	Address         string   `json:"address"`
-	Role            string   `json:"role"` // hub | spoke | peer
-	InterfaceName   string   `json:"interface_name,omitempty"`
-	ListenPort      int      `json:"listen_port,omitempty"`
+	NetworkID     string `json:"network_id"`
+	NodeID        string `json:"node_id"`
+	Address       string `json:"address"`
+	Role          string `json:"role"` // hub | spoke | peer
+	InterfaceName string `json:"interface_name,omitempty"`
+	ListenPort    int    `json:"listen_port,omitempty"`
+	// Endpoint is the peer dial address rendered into WireGuard configs. It must
+	// be host:port, with IPv6 hosts bracketed as in net.JoinHostPort.
 	Endpoint        string   `json:"endpoint,omitempty"`
 	Keepalive       int      `json:"keepalive,omitempty"`
 	MTU             int      `json:"mtu,omitempty"`

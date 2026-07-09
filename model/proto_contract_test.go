@@ -176,9 +176,113 @@ func TestProtoContractsExistAndStayRedacted(t *testing.T) {
 		}
 	}
 	netEndpoint := messageBody(t, string(common), "NetEndpoint")
-	for _, field := range []string{"string kind = 1;", "string node_id = 2;", "string cidr = 3;", "string domain = 4;"} {
+	for _, field := range []string{"string kind = 1;", "string node_id = 2;", "string cidr = 3;", "string domain = 4;", "string zone_id = 5;"} {
 		if !strings.Contains(netEndpoint, field) {
 			t.Fatalf("NetEndpoint missing field %s", field)
+		}
+	}
+	guardPortRange := messageBody(t, string(common), "GuardPortRange")
+	for _, field := range []string{"uint32 from = 1;", "uint32 to = 2;"} {
+		if !strings.Contains(guardPortRange, field) {
+			t.Fatalf("GuardPortRange missing field %s", field)
+		}
+	}
+	guardZone := messageBody(t, string(common), "GuardZone")
+	for _, field := range []string{
+		"string id = 1;",
+		"string name = 2;",
+		"bool builtin = 3;",
+		"repeated string interfaces = 4;",
+		"repeated string cidrs = 5;",
+		"TimePoint updated_at = 8;",
+	} {
+		if !strings.Contains(guardZone, field) {
+			t.Fatalf("GuardZone missing field %s", field)
+		}
+	}
+	guardRule := messageBody(t, string(common), "GuardRule")
+	if strings.Contains(guardRule, "rate_limit") {
+		t.Fatal("GuardRule must not freeze rate_limit before the structured contract is designed")
+	}
+	for _, field := range []string{
+		"string action = 3;",
+		"string direction = 4;",
+		"string protocol = 5;",
+		"repeated GuardPortRange ports = 6;",
+		"NetEndpoint remote = 7;",
+		"bool log = 8;",
+		"bool disabled = 9;",
+	} {
+		if !strings.Contains(guardRule, field) {
+			t.Fatalf("GuardRule missing field %s", field)
+		}
+	}
+	securityGroup := messageBody(t, string(common), "SecurityGroup")
+	for _, field := range []string{
+		"repeated GuardRule rules = 4;",
+		"int64 version = 5;",
+		"TimePoint updated_at = 7;",
+	} {
+		if !strings.Contains(securityGroup, field) {
+			t.Fatalf("SecurityGroup missing field %s", field)
+		}
+	}
+	nodeGuardBinding := messageBody(t, string(common), "NodeGuardBinding")
+	for _, field := range []string{
+		"repeated string group_ids = 2;",
+		"repeated GuardRule overrides = 3;",
+		"repeated string zone_ids = 4;",
+		"bool managed = 5;",
+		"string applied_table_sha = 10;",
+	} {
+		if !strings.Contains(nodeGuardBinding, field) {
+			t.Fatalf("NodeGuardBinding missing field %s", field)
+		}
+	}
+	guardReality := messageBody(t, string(common), "GuardNodeReality")
+	for _, field := range []string{
+		"repeated GuardListener listeners = 2;",
+		"repeated GuardInterface interfaces = 3;",
+		"string managed_sha = 4;",
+		"repeated string foreign_tables = 5;",
+		"TimePoint collected_at = 7;",
+	} {
+		if !strings.Contains(guardReality, field) {
+			t.Fatalf("GuardNodeReality missing field %s", field)
+		}
+	}
+	wgNetwork := messageBody(t, string(common), "WGNetwork")
+	for _, field := range []string{
+		"string cidr = 3;",
+		"string topology = 4;",
+		"uint32 listen_port = 5;",
+		"repeated string dns = 8;",
+		"int64 version = 10;",
+	} {
+		if !strings.Contains(wgNetwork, field) {
+			t.Fatalf("WGNetwork missing field %s", field)
+		}
+	}
+	wgMembership := messageBody(t, string(common), "WGMembership")
+	for _, field := range []string{
+		"string network_id = 1;",
+		"string node_id = 2;",
+		"string interface_name = 5;",
+		"string endpoint = 7;",
+		"repeated string extra_allowed_ips = 10;",
+	} {
+		if !strings.Contains(wgMembership, field) {
+			t.Fatalf("WGMembership missing field %s", field)
+		}
+	}
+	wgExternalPeer := messageBody(t, string(common), "WGExternalPeer")
+	for _, field := range []string{
+		"string public_key = 5;",
+		"repeated string allowed_ips = 6;",
+		"TimePoint last_issued_at = 7;",
+	} {
+		if !strings.Contains(wgExternalPeer, field) {
+			t.Fatalf("WGExternalPeer missing field %s", field)
 		}
 	}
 	dnsDeployment := messageBody(t, string(common), "DNSDeploymentView")

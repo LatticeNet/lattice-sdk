@@ -1228,6 +1228,26 @@ type Approval struct {
 	ApprovedBy string    `json:"approved_by,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
+
+	// Operation binding (spec §9.3). When a plugin's plan-effect method produces a
+	// host-risk plan, the approval records the exact code and inputs that produced it,
+	// so execution can refuse to run against anything that has since changed. These are
+	// typed columns rather than values buried in Plan: each is compared to live state at
+	// execute time, and each is what the operator's review is accountable for.
+	//
+	// All omitempty, so an approval that is not a plugin operation (nft, dns, agent
+	// update) serializes exactly as before.
+	PluginVersion  string `json:"plugin_version,omitempty"`
+	ArtifactDigest string `json:"artifact_digest,omitempty"`
+	Service        string `json:"service,omitempty"`
+	Method         string `json:"method,omitempty"`
+	// RequestSHA256 hashes the request that produced the plan. Re-planning with
+	// different inputs yields a different approval; an approval cannot be replayed
+	// against a request the operator never saw.
+	RequestSHA256 string `json:"request_sha256,omitempty"`
+	// Targets is the full node set the operation would touch. NodeID stays as the first
+	// target so the existing per-node approval machinery keeps working unchanged.
+	Targets []string `json:"targets,omitempty"`
 }
 
 const (

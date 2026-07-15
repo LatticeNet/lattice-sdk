@@ -71,6 +71,12 @@ func TestProtoContractsExistAndStayRedacted(t *testing.T) {
 		"string reason = 12;",
 		"bool stale = 13;",
 		"string stale_code = 14;",
+		"string plugin_version = 15;",
+		"string artifact_digest = 16;",
+		"string service = 17;",
+		"string method = 18;",
+		"string request_sha256 = 19;",
+		"repeated string targets = 20;",
 	} {
 		if !strings.Contains(approvalView, field) {
 			t.Fatalf("ApprovalView missing field %s", field)

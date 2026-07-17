@@ -938,25 +938,30 @@ type ProxyUsageSnapshot struct {
 // machines provisioned out-of-band. Secret-free: share_url already encodes the
 // connection without exposing additional server-side material.
 type SingBoxNode struct {
-	Name             string            `json:"name"`
-	LineID           string            `json:"line_id,omitempty"`
-	NodeIdentityUUID string            `json:"node_identity_uuid,omitempty"`
-	Protocol         string            `json:"protocol,omitempty"`
-	Network          string            `json:"network,omitempty"`
-	Address          string            `json:"address,omitempty"`
-	Port             string            `json:"port,omitempty"`
-	SNI              string            `json:"sni,omitempty"`
-	Host             string            `json:"host,omitempty"`
-	ListenHost       string            `json:"listen_host,omitempty"`
-	OutboundRef      string            `json:"outbound_ref,omitempty"`
-	OutboundServer   string            `json:"outbound_server,omitempty"`
-	OutboundPort     string            `json:"outbound_port,omitempty"`
-	OutboundType     string            `json:"outbound_type,omitempty"`
-	UserCount        int               `json:"user_count,omitempty"`
-	UserKnown        bool              `json:"user_known,omitempty"`
-	Metadata         map[string]string `json:"metadata,omitempty"`
-	PublicKey        string            `json:"public_key,omitempty"`
-	ShareURL         string            `json:"share_url,omitempty"`
+	Name             string `json:"name"`
+	LineID           string `json:"line_id,omitempty"`
+	LineUUID         string `json:"line_uuid,omitempty"` // design-15 D1: control-plane line identity from the sidecar
+	NodeIdentityUUID string `json:"node_identity_uuid,omitempty"`
+	Protocol         string `json:"protocol,omitempty"`
+	Network          string `json:"network,omitempty"`
+	Address          string `json:"address,omitempty"`
+	Port             string `json:"port,omitempty"`
+	SNI              string `json:"sni,omitempty"`
+	Host             string `json:"host,omitempty"`
+	ListenHost       string `json:"listen_host,omitempty"`
+	OutboundRef      string `json:"outbound_ref,omitempty"`
+	OutboundServer   string `json:"outbound_server,omitempty"`
+	OutboundPort     string `json:"outbound_port,omitempty"`
+	OutboundType     string `json:"outbound_type,omitempty"`
+	// DownstreamLineUUID is the declared chain edge target (design-15 §6), read
+	// from the sidecar chain block; empty when the line is single-exit or the
+	// edge is only inferable from outbound host/port.
+	DownstreamLineUUID string            `json:"downstream_line_uuid,omitempty"`
+	UserCount          int               `json:"user_count,omitempty"`
+	UserKnown          bool              `json:"user_known,omitempty"`
+	Metadata           map[string]string `json:"metadata,omitempty"`
+	PublicKey          string            `json:"public_key,omitempty"`
+	ShareURL           string            `json:"share_url,omitempty"`
 }
 
 // SingBoxInventory is the latest snapshot of the sing-box nodes discovered on one

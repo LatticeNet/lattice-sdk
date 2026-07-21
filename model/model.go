@@ -157,6 +157,9 @@ type AgentLaunchConfig struct {
 	ProxyUsageXrayAPI     string    `json:"proxy_usage_xray_api,omitempty"`
 	ProxyUsageXrayBin     string    `json:"proxy_usage_xray_bin,omitempty"`
 	ProxyUsageXrayPattern string    `json:"proxy_usage_xray_pattern,omitempty"`
+	// SingBoxStatsAPI is the loopback host:port of the sing-box experimental
+	// stats API (ADR-004); empty disables the singbox-stats collector.
+	SingBoxStatsAPI       string    `json:"singbox_stats_api,omitempty"`
 	UpdatedAt             time.Time `json:"updated_at,omitempty"`
 }
 

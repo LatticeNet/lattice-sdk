@@ -144,23 +144,23 @@ type AgentDebugConfig struct {
 // dashboard's enroll/reconfigure command generator. Runtime overrides that
 // already-running agents poll remain in AgentConfig instead.
 type AgentLaunchConfig struct {
-	AllowExec             bool      `json:"allow_exec"`
-	AllowRootExec         bool      `json:"allow_root_exec"`
-	NoExec                bool      `json:"no_exec"`
-	AllowTerminal         bool      `json:"allow_terminal"`
-	TerminalTransport     string    `json:"terminal_transport,omitempty"`
-	SSHAlerts             bool      `json:"ssh_alerts"`
-	SingBoxDiscover       bool      `json:"singbox_discover"`
-	SingBoxBin            string    `json:"singbox_bin,omitempty"`
-	ProxyUsageFile        string    `json:"proxy_usage_file,omitempty"`
-	ProxyUsageURL         string    `json:"proxy_usage_url,omitempty"`
-	ProxyUsageXrayAPI     string    `json:"proxy_usage_xray_api,omitempty"`
-	ProxyUsageXrayBin     string    `json:"proxy_usage_xray_bin,omitempty"`
-	ProxyUsageXrayPattern string    `json:"proxy_usage_xray_pattern,omitempty"`
+	AllowExec             bool   `json:"allow_exec"`
+	AllowRootExec         bool   `json:"allow_root_exec"`
+	NoExec                bool   `json:"no_exec"`
+	AllowTerminal         bool   `json:"allow_terminal"`
+	TerminalTransport     string `json:"terminal_transport,omitempty"`
+	SSHAlerts             bool   `json:"ssh_alerts"`
+	SingBoxDiscover       bool   `json:"singbox_discover"`
+	SingBoxBin            string `json:"singbox_bin,omitempty"`
+	ProxyUsageFile        string `json:"proxy_usage_file,omitempty"`
+	ProxyUsageURL         string `json:"proxy_usage_url,omitempty"`
+	ProxyUsageXrayAPI     string `json:"proxy_usage_xray_api,omitempty"`
+	ProxyUsageXrayBin     string `json:"proxy_usage_xray_bin,omitempty"`
+	ProxyUsageXrayPattern string `json:"proxy_usage_xray_pattern,omitempty"`
 	// SingBoxStatsAPI is the loopback host:port of the sing-box experimental
 	// stats API (ADR-004); empty disables the singbox-stats collector.
-	SingBoxStatsAPI       string    `json:"singbox_stats_api,omitempty"`
-	UpdatedAt             time.Time `json:"updated_at,omitempty"`
+	SingBoxStatsAPI string    `json:"singbox_stats_api,omitempty"`
+	UpdatedAt       time.Time `json:"updated_at,omitempty"`
 }
 
 type AgentConfig struct {

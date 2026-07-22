@@ -144,20 +144,23 @@ type AgentDebugConfig struct {
 // dashboard's enroll/reconfigure command generator. Runtime overrides that
 // already-running agents poll remain in AgentConfig instead.
 type AgentLaunchConfig struct {
-	AllowExec             bool      `json:"allow_exec"`
-	AllowRootExec         bool      `json:"allow_root_exec"`
-	NoExec                bool      `json:"no_exec"`
-	AllowTerminal         bool      `json:"allow_terminal"`
-	TerminalTransport     string    `json:"terminal_transport,omitempty"`
-	SSHAlerts             bool      `json:"ssh_alerts"`
-	SingBoxDiscover       bool      `json:"singbox_discover"`
-	SingBoxBin            string    `json:"singbox_bin,omitempty"`
-	ProxyUsageFile        string    `json:"proxy_usage_file,omitempty"`
-	ProxyUsageURL         string    `json:"proxy_usage_url,omitempty"`
-	ProxyUsageXrayAPI     string    `json:"proxy_usage_xray_api,omitempty"`
-	ProxyUsageXrayBin     string    `json:"proxy_usage_xray_bin,omitempty"`
-	ProxyUsageXrayPattern string    `json:"proxy_usage_xray_pattern,omitempty"`
-	UpdatedAt             time.Time `json:"updated_at,omitempty"`
+	AllowExec             bool   `json:"allow_exec"`
+	AllowRootExec         bool   `json:"allow_root_exec"`
+	NoExec                bool   `json:"no_exec"`
+	AllowTerminal         bool   `json:"allow_terminal"`
+	TerminalTransport     string `json:"terminal_transport,omitempty"`
+	SSHAlerts             bool   `json:"ssh_alerts"`
+	SingBoxDiscover       bool   `json:"singbox_discover"`
+	SingBoxBin            string `json:"singbox_bin,omitempty"`
+	ProxyUsageFile        string `json:"proxy_usage_file,omitempty"`
+	ProxyUsageURL         string `json:"proxy_usage_url,omitempty"`
+	ProxyUsageXrayAPI     string `json:"proxy_usage_xray_api,omitempty"`
+	ProxyUsageXrayBin     string `json:"proxy_usage_xray_bin,omitempty"`
+	ProxyUsageXrayPattern string `json:"proxy_usage_xray_pattern,omitempty"`
+	// SingBoxStatsAPI is the loopback host:port of the sing-box experimental
+	// stats API (ADR-004); empty disables the singbox-stats collector.
+	SingBoxStatsAPI string    `json:"singbox_stats_api,omitempty"`
+	UpdatedAt       time.Time `json:"updated_at,omitempty"`
 }
 
 type AgentConfig struct {
@@ -938,25 +941,30 @@ type ProxyUsageSnapshot struct {
 // machines provisioned out-of-band. Secret-free: share_url already encodes the
 // connection without exposing additional server-side material.
 type SingBoxNode struct {
-	Name             string            `json:"name"`
-	LineID           string            `json:"line_id,omitempty"`
-	NodeIdentityUUID string            `json:"node_identity_uuid,omitempty"`
-	Protocol         string            `json:"protocol,omitempty"`
-	Network          string            `json:"network,omitempty"`
-	Address          string            `json:"address,omitempty"`
-	Port             string            `json:"port,omitempty"`
-	SNI              string            `json:"sni,omitempty"`
-	Host             string            `json:"host,omitempty"`
-	ListenHost       string            `json:"listen_host,omitempty"`
-	OutboundRef      string            `json:"outbound_ref,omitempty"`
-	OutboundServer   string            `json:"outbound_server,omitempty"`
-	OutboundPort     string            `json:"outbound_port,omitempty"`
-	OutboundType     string            `json:"outbound_type,omitempty"`
-	UserCount        int               `json:"user_count,omitempty"`
-	UserKnown        bool              `json:"user_known,omitempty"`
-	Metadata         map[string]string `json:"metadata,omitempty"`
-	PublicKey        string            `json:"public_key,omitempty"`
-	ShareURL         string            `json:"share_url,omitempty"`
+	Name             string `json:"name"`
+	LineID           string `json:"line_id,omitempty"`
+	LineUUID         string `json:"line_uuid,omitempty"` // design-15 D1: control-plane line identity from the sidecar
+	NodeIdentityUUID string `json:"node_identity_uuid,omitempty"`
+	Protocol         string `json:"protocol,omitempty"`
+	Network          string `json:"network,omitempty"`
+	Address          string `json:"address,omitempty"`
+	Port             string `json:"port,omitempty"`
+	SNI              string `json:"sni,omitempty"`
+	Host             string `json:"host,omitempty"`
+	ListenHost       string `json:"listen_host,omitempty"`
+	OutboundRef      string `json:"outbound_ref,omitempty"`
+	OutboundServer   string `json:"outbound_server,omitempty"`
+	OutboundPort     string `json:"outbound_port,omitempty"`
+	OutboundType     string `json:"outbound_type,omitempty"`
+	// DownstreamLineUUID is the declared chain edge target (design-15 §6), read
+	// from the sidecar chain block; empty when the line is single-exit or the
+	// edge is only inferable from outbound host/port.
+	DownstreamLineUUID string            `json:"downstream_line_uuid,omitempty"`
+	UserCount          int               `json:"user_count,omitempty"`
+	UserKnown          bool              `json:"user_known,omitempty"`
+	Metadata           map[string]string `json:"metadata,omitempty"`
+	PublicKey          string            `json:"public_key,omitempty"`
+	ShareURL           string            `json:"share_url,omitempty"`
 }
 
 // SingBoxInventory is the latest snapshot of the sing-box nodes discovered on one
@@ -1228,6 +1236,26 @@ type Approval struct {
 	ApprovedBy string    `json:"approved_by,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
+
+	// Operation binding (spec §9.3). When a plugin's plan-effect method produces a
+	// host-risk plan, the approval records the exact code and inputs that produced it,
+	// so execution can refuse to run against anything that has since changed. These are
+	// typed columns rather than values buried in Plan: each is compared to live state at
+	// execute time, and each is what the operator's review is accountable for.
+	//
+	// All omitempty, so an approval that is not a plugin operation (nft, dns, agent
+	// update) serializes exactly as before.
+	PluginVersion  string `json:"plugin_version,omitempty"`
+	ArtifactDigest string `json:"artifact_digest,omitempty"`
+	Service        string `json:"service,omitempty"`
+	Method         string `json:"method,omitempty"`
+	// RequestSHA256 hashes the request that produced the plan. Re-planning with
+	// different inputs yields a different approval; an approval cannot be replayed
+	// against a request the operator never saw.
+	RequestSHA256 string `json:"request_sha256,omitempty"`
+	// Targets is the full node set the operation would touch. NodeID stays as the first
+	// target so the existing per-node approval machinery keeps working unchanged.
+	Targets []string `json:"targets,omitempty"`
 }
 
 const (

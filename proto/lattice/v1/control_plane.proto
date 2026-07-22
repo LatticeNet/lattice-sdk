@@ -127,6 +127,14 @@ message ApprovalView {
   string reason = 12;
   bool stale = 13;
   string stale_code = 14;
+  // Operation binding (spec §9.3): the exact code and inputs that produced a
+  // plugin plan, surfaced so an operator reviews what will actually run.
+  string plugin_version = 15;
+  string artifact_digest = 16;
+  string service = 17;
+  string method = 18;
+  string request_sha256 = 19;
+  repeated string targets = 20;
 }
 
 message ApproveRequest {

@@ -19,6 +19,9 @@ github.com/LatticeNet/lattice-sdk
   inbound/user/node-profile/usage intent state, approval-linked tasks, task
   results, audit events, KV entries, static objects, Worker scripts, and
   approvals.
+- `plugin` - system-plugin stdio-json-v1 helpers: request/response framing,
+  fd-3 host-call client helpers, manifest/capability structs, and signed
+  per-method invoke budget types.
 
 ## Proto Contracts
 

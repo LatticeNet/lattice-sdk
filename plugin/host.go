@@ -269,16 +269,21 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 		if !ok && (len(strictEnv.HostResponse.Error) == 0 || bytes.Equal(strictEnv.HostResponse.Error, []byte("null"))) {
 			return nil, fmt.Errorf("decode host_response: invalid failure")
 		}
-		if !ok && len(strictEnv.HostResponse.Result) > 0 && !bytes.Equal(strictEnv.HostResponse.Result, []byte("null")) {
+		if !ok && len(strictEnv.HostResponse.Result) > 0 {
 			return nil, fmt.Errorf("decode host_response: failure result")
+		}
+		if ok && len(strictEnv.HostResponse.Error) > 0 && !bytes.Equal(strictEnv.HostResponse.Error, []byte("null")) {
+			return nil, fmt.Errorf("decode host_response: success error")
 		}
 		var result json.RawMessage
 		if len(strictEnv.HostResponse.Result) > 0 {
 			result = strictEnv.HostResponse.Result
 		}
 		var errText string
-		if len(strictEnv.HostResponse.Error) > 0 {
-			_ = json.Unmarshal(strictEnv.HostResponse.Error, &errText)
+		if len(strictEnv.HostResponse.Error) > 0 && !bytes.Equal(strictEnv.HostResponse.Error, []byte("null")) {
+			if json.Unmarshal(strictEnv.HostResponse.Error, &errText) != nil {
+				return nil, fmt.Errorf("decode host_response: invalid error")
+			}
 		}
 		env.HostResponse = hostResponse{ID: id, OK: ok, Result: result, Error: errText}
 	} else if err := json.Unmarshal(scanned.raw, &env); err != nil {

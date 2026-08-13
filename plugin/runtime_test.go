@@ -344,7 +344,20 @@ func TestStrictHostCallHostileActual(t *testing.T) {
 		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"bad","host_response":{"id":"h1","ok":true,"result":{}}}`,
 		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"ok":true,"result":{}}}`,
 		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":null,"result":{}}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{},"x":1}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","id":"h1","ok":true,"result":{}}}`,
 		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":"x","result":{}}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":null}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{},"error":null}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{},"error":"bad"}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":""}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":null}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":3}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":"x","result":null}}`,
+		`{"protocol":1,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
+		`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}} trailing`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{"x":"` + strings.Repeat("x", DefaultMaxHostResponseBytes) + `"}}}`,
 	}
 	for _, raw := range frames {
 		var out bytes.Buffer

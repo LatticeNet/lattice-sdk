@@ -475,7 +475,7 @@ func TestRuntimeGoldenHostKVExact(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- rt.ServeV2(context.Background(), HandlerFunc(func(ctx context.Context, _ Request, h *HostClient) Response {
-			_, _, err := h.KVGet(ctx, "k")
+			_, err := h.Call(ctx, "kv.get", map[string]any{"key": "k"})
 			if err != nil {
 				t.Error(err)
 			}

@@ -805,17 +805,19 @@ func FuzzStrictV2Decoder(f *testing.F) {
 func FuzzStrictHostResponseValidation(f *testing.F) {
 	valid := []byte(`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`)
 	f.Add(valid)
+	f.Add([]byte(`{"":0,"":1}`))
 	f.Fuzz(func(t *testing.T, raw []byte) {
-		payload := json.RawMessage(raw)
+		const maxFuzzPayloadBytes = DefaultMaxHostResponseBytes / 4
+		payload := json.RawMessage(`{"x":1}`)
 		var semantic any
-		if !json.Valid(payload) || json.Unmarshal(payload, &semantic) != nil {
-			payload = json.RawMessage(`{"x":1}`)
-		} else {
-			var compact bytes.Buffer
-			if err := json.Compact(&compact, payload); err != nil {
+		if len(raw) <= maxFuzzPayloadBytes && json.Valid(raw) && json.Unmarshal(raw, &semantic) == nil {
+			canonical, err := json.Marshal(semantic)
+			if err != nil {
 				t.Fatal(err)
 			}
-			payload = json.RawMessage(compact.Bytes())
+			if len(canonical) <= maxFuzzPayloadBytes {
+				payload = json.RawMessage(canonical)
+			}
 		}
 		base := string(payload)
 		for _, hostile := range []string{

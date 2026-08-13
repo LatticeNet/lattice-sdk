@@ -186,6 +186,8 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 	var serveTransport *hostTransport
 	if rt.Host != nil && rt.Host.transport != nil {
 		serveTransport = &hostTransport{output: rt.Out, responses: rt.Host.transport.responses, closer: rt.Host.transport.closer}
+		serveTransport.exchange = make(chan struct{}, 1)
+		serveTransport.exchange <- struct{}{}
 	}
 	rt.v2Transport = serveTransport
 	if err := rt.emitV2(ready); err != nil {

@@ -53,6 +53,7 @@ type hostTransport struct {
 	responses *bufio.Scanner
 	writeMu   sync.Mutex
 	readMu    sync.Mutex
+	exchange  chan struct{}
 	nextID    uint64
 	closer    io.Closer
 	poisoned  atomic.Bool
@@ -84,7 +85,8 @@ func NewHostClient(opts HostClientOptions) *HostClient {
 	if c, ok := opts.Responses.(io.Closer); ok {
 		closer = c
 	}
-	client.transport = &hostTransport{output: client.output, responses: client.responses, closer: closer}
+	client.transport = &hostTransport{output: client.output, responses: client.responses, closer: closer, exchange: make(chan struct{}, 1)}
+	client.transport.exchange <- struct{}{}
 	return client
 }
 
@@ -195,8 +197,13 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 		t = &hostTransport{output: c.output, responses: c.responses}
 		c.transport = t
 	}
-	t.readMu.Lock()
-	defer t.readMu.Unlock()
+	select {
+	case <-t.exchange:
+	case <-ctx.Done():
+		c.Abort()
+		return nil, ctx.Err()
+	}
+	defer func() { t.exchange <- struct{}{} }()
 	t.writeMu.Lock()
 	t.nextID++
 	id := fmt.Sprintf("h%d", t.nextID)

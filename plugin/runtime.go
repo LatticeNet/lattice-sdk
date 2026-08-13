@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 )
 
 const (
@@ -169,6 +170,9 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 	if generation == 0 {
 		return fmt.Errorf("invalid stdio-json-v2 generation")
 	}
+	if rt.Host != nil && rt.Host.output != nil && rt.Out != nil && !sameWriter(rt.Host.output, rt.Out) {
+		return fmt.Errorf("v2 host output mismatch")
+	}
 	scanner := bufio.NewScanner(rt.In)
 	max := rt.MaxRequestBytes
 	if max <= 0 {
@@ -245,6 +249,17 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 		}
 	}
 	return scanner.Err()
+}
+
+func sameWriter(a, b io.Writer) bool {
+	va, vb := reflect.ValueOf(a), reflect.ValueOf(b)
+	if !va.IsValid() || !vb.IsValid() || va.Type() != vb.Type() {
+		return false
+	}
+	if va.Type().Comparable() {
+		return va.Interface() == vb.Interface()
+	}
+	return reflect.DeepEqual(a, b)
 }
 
 func decodeInvokeV2(raw []byte, generation uint64) (struct {

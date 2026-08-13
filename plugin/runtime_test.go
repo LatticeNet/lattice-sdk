@@ -519,6 +519,18 @@ func TestServeV2NonclosableHostFailsFacadeClosed(t *testing.T) {
 	}
 }
 
+func TestServeV2RejectsMismatchedHostOutput(t *testing.T) {
+	var hostOut, runtimeOut bytes.Buffer
+	h := NewHostClient(HostClientOptions{Output: &hostOut, Responses: io.NopCloser(strings.NewReader(`{}\n`))})
+	rt := &Runtime{In: strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{}}\n`), Out: &runtimeOut, Host: h}
+	if err := rt.ServeV2(context.Background(), HandlerFunc(func(context.Context, Request, *HostClient) Response { return Response{OK: true} }), 1); err == nil {
+		t.Fatal("mismatched host output accepted")
+	}
+	if runtimeOut.Len() != 0 {
+		t.Fatalf("runtime_ready emitted before mismatch rejection: %q", runtimeOut.String())
+	}
+}
+
 func TestHostClientQueuedCancelDoesNotPoisonActiveExchange(t *testing.T) {
 	pr, pw := io.Pipe()
 	out := lockedTestWriter{call: make(chan struct{})}

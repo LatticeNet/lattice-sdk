@@ -44,6 +44,9 @@ type SubscriptionSnapshot struct {
 	// Stale is explicit in v2. It is independent of FetchError so public serving
 	// code never has to infer whether preserved last-good content is current.
 	Stale bool `json:"stale"`
+
+	persistedSchemaVersion int
+	needsRewrite           bool
 }
 
 // UnmarshalJSON performs the only supported in-memory schema migration. The
@@ -55,7 +58,8 @@ func (s *SubscriptionSnapshot) UnmarshalJSON(raw []byte) error {
 	if err := json.Unmarshal(raw, &decoded); err != nil {
 		return err
 	}
-	switch decoded.SchemaVersion {
+	persistedVersion := decoded.SchemaVersion
+	switch persistedVersion {
 	case 1:
 		decoded.SchemaVersion = SubscriptionSnapshotSchemaVersion
 		decoded.Stale = decoded.FetchError != ""
@@ -64,7 +68,19 @@ func (s *SubscriptionSnapshot) UnmarshalJSON(raw []byte) error {
 		return fmt.Errorf("unsupported subscription snapshot schema version %d", decoded.SchemaVersion)
 	}
 	*s = SubscriptionSnapshot(decoded)
+	s.persistedSchemaVersion = persistedVersion
+	s.needsRewrite = persistedVersion != SubscriptionSnapshotSchemaVersion
 	return nil
+}
+
+func (s SubscriptionSnapshot) PersistedSchemaVersion() int { return s.persistedSchemaVersion }
+
+func (s SubscriptionSnapshot) NeedsRewrite() bool { return s.needsRewrite }
+
+func (s SubscriptionSnapshot) Clone() SubscriptionSnapshot {
+	out := s
+	out.SourceManifest = append(json.RawMessage(nil), s.SourceManifest...)
+	return out
 }
 
 // SnapshotKey is the storage key for one subscription's snapshot.

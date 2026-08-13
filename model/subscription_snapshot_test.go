@@ -69,7 +69,33 @@ func TestSubscriptionSnapshotV1MigrationMarksFailedLastGoodStale(t *testing.T) {
 			if got.SourceVersion != "" || len(got.SourceManifest) != 0 {
 				t.Fatalf("v1 migration invented provenance: %+v", got)
 			}
+			if got.PersistedSchemaVersion() != 1 || !got.NeedsRewrite() {
+				t.Fatalf("v1 rewrite authority lost: persisted=%d rewrite=%v", got.PersistedSchemaVersion(), got.NeedsRewrite())
+			}
 		})
+	}
+}
+
+func TestSubscriptionSnapshotV2DoesNotNeedRewriteAndClonesManifest(t *testing.T) {
+	manifest, version, err := CanonicalSubscriptionSourceManifest(validSubscriptionSourceManifest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(SubscriptionSnapshot{SchemaVersion: 2, PluginID: "p", SubscriptionID: "s", SourceVersion: version, SourceManifest: manifest})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got SubscriptionSnapshot
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.PersistedSchemaVersion() != 2 || got.NeedsRewrite() {
+		t.Fatalf("v2 rewrite metadata = %d/%v", got.PersistedSchemaVersion(), got.NeedsRewrite())
+	}
+	clone := got.Clone()
+	clone.SourceManifest[0] = 'x'
+	if got.SourceManifest[0] == 'x' {
+		t.Fatal("snapshot clone aliases source manifest")
 	}
 }
 

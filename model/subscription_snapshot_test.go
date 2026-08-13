@@ -78,6 +78,17 @@ func TestSubscriptionSnapshotV1MigrationMarksFailedLastGoodStale(t *testing.T) {
 			if got.PersistedSchemaVersion() != 1 || !got.NeedsRewrite() {
 				t.Fatalf("v1 rewrite authority lost: persisted=%d rewrite=%v", got.PersistedSchemaVersion(), got.NeedsRewrite())
 			}
+			rewritten, err := json.Marshal(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var reopened SubscriptionSnapshot
+			if err := json.Unmarshal(rewritten, &reopened); err != nil {
+				t.Fatalf("rewritten legacy snapshot cannot reopen: %v", err)
+			}
+			if reopened.PersistedSchemaVersion() != 2 || reopened.NeedsRewrite() || reopened.SourceVersion != "" || len(reopened.SourceManifest) != 0 {
+				t.Fatalf("rewritten legacy snapshot lost empty-provenance authority: %+v", reopened)
+			}
 		})
 	}
 }

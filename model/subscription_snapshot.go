@@ -103,8 +103,16 @@ func (s *SubscriptionSnapshot) UnmarshalJSON(raw []byte) error {
 		decoded.SchemaVersion = SubscriptionSnapshotSchemaVersion
 		decoded.Stale = decoded.FetchError != ""
 	case SubscriptionSnapshotSchemaVersion:
+		_, sourceVersionPresent := fields["source_version"]
+		_, sourceManifestPresent := fields["source_manifest"]
+		if sourceVersionPresent != sourceManifestPresent {
+			return fmt.Errorf("subscription snapshot v2 requires paired provenance fields")
+		}
+		if !sourceVersionPresent {
+			break
+		}
 		if decoded.SourceVersion == "" || len(decoded.SourceManifest) == 0 || bytes.Equal(decoded.SourceManifest, []byte("null")) {
-			return fmt.Errorf("subscription snapshot v2 requires paired provenance")
+			return fmt.Errorf("subscription snapshot v2 provenance fields must be nonempty")
 		}
 		if _, err := DecodeSubscriptionSourceManifest(decoded.SourceManifest); err != nil {
 			return fmt.Errorf("invalid subscription snapshot source manifest: %w", err)

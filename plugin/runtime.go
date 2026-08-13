@@ -220,6 +220,12 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 		if invHost != nil {
 			invHost.Expire()
 		}
+		if err := session.Accept("invoke_result", frame.Generation, frame.InvocationID); err != nil {
+			return err
+		}
+		if err := session.Accept("invoke_ready", frame.Generation, frame.InvocationID); err != nil {
+			return err
+		}
 		out := struct {
 			Protocol     int      `json:"protocol"`
 			Kind         string   `json:"kind"`
@@ -233,12 +239,6 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 		ready.InvocationID = frame.InvocationID
 		ready.Kind = "invoke_ready"
 		if err := rt.emitV2(ready); err != nil {
-			return err
-		}
-		if err := session.Accept("invoke_result", frame.Generation, frame.InvocationID); err != nil {
-			return err
-		}
-		if err := session.Accept("invoke_ready", frame.Generation, frame.InvocationID); err != nil {
 			return err
 		}
 	}

@@ -150,9 +150,11 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 		t = &hostTransport{output: c.output, responses: c.responses}
 		c.transport = t
 	}
+	t.readMu.Lock()
+	defer t.readMu.Unlock()
+	t.writeMu.Lock()
 	t.nextID++
 	id := fmt.Sprintf("h%d", t.nextID)
-	t.writeMu.Lock()
 	if c.expired.Load() {
 		t.writeMu.Unlock()
 		c.leaseMu.Unlock()
@@ -172,8 +174,6 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	t.readMu.Lock()
-	defer t.readMu.Unlock()
 	if !t.responses.Scan() {
 		if err := t.responses.Err(); err != nil {
 			return nil, fmt.Errorf("read host_response: %w", err)
@@ -194,7 +194,7 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 	if env.HostResponse.HostCallID != "" && env.HostResponse.HostCallID != id {
 		return nil, fmt.Errorf("host_response host_call_id mismatch: got %q want %q", env.HostResponse.HostCallID, id)
 	}
-	if c.strict && (env.Protocol != 2 || env.Kind != "host_response" || env.HostCallID != id || env.HostResponse.HostCallID == "" || env.HostResponse.Generation != c.generation || env.HostResponse.InvocationID != c.invocationID) {
+	if c.strict && (env.Protocol != 2 || env.Kind != "host_response" || env.HostCallID != id || env.Generation != c.generation || env.InvocationID != c.invocationID || env.HostResponse.HostCallID == "" || env.HostResponse.Generation != c.generation || env.HostResponse.InvocationID != c.invocationID) {
 		return nil, fmt.Errorf("host_response correlation mismatch")
 	}
 	if !env.HostResponse.OK {

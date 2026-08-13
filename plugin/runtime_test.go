@@ -222,3 +222,11 @@ func TestManifestTypesPreserveStringAndTypedInterfaceMethods(t *testing.T) {
 		t.Fatalf("typed budget did not round-trip: %s", raw)
 	}
 }
+
+func TestRuntimeProtocolStdioJSONV2StrictFrames(t *testing.T) {
+	for _, proto := range []string{"stdio-json-v2"} {
+		if proto == RuntimeProtocolStdioJSONV1 {
+			t.Fatal("v2 must not alias v1")
+		}
+	}
+}

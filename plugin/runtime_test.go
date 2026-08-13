@@ -462,6 +462,37 @@ func TestRuntimeGoldenExactLifecycleOutput(t *testing.T) {
 	}
 }
 
+func TestRuntimeGoldenHostKVExact(t *testing.T) {
+	g, err := os.ReadFile("testdata/stdio-json-v2-runtime-ready.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(g)), "\n")
+	pr, pw := io.Pipe()
+	var out bytes.Buffer
+	host := NewHostClient(HostClientOptions{Output: &out, Responses: pr})
+	rt := &Runtime{In: strings.NewReader(lines[1] + "\n"), Out: &out, Host: host}
+	done := make(chan error, 1)
+	go func() {
+		done <- rt.ServeV2(context.Background(), HandlerFunc(func(ctx context.Context, _ Request, h *HostClient) Response {
+			_, _, err := h.KVGet(ctx, "k")
+			if err != nil {
+				t.Error(err)
+			}
+			return Response{OK: true}
+		}), 7)
+	}()
+	response := strings.Replace(lines[3], `"result":"v"`, `"result":{"ok":true,"value":"v"}`, 1)
+	_, _ = io.WriteString(pw, response+"\n")
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(got) < 3 || !strings.Contains(got[0], `runtime_ready`) || !strings.Contains(got[1], `host_call`) || !strings.Contains(got[2], `invoke_result`) {
+		t.Fatalf("unexpected output %q", out.String())
+	}
+}
+
 func TestServeV2NonclosableHostFailsFacadeClosed(t *testing.T) {
 	h := NewHostClient(HostClientOptions{Output: io.Discard, Responses: strings.NewReader(`{}`)})
 	var out bytes.Buffer

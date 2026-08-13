@@ -259,7 +259,7 @@ func sameWriter(a, b io.Writer) bool {
 	if va.Type().Comparable() {
 		return va.Interface() == vb.Interface()
 	}
-	return reflect.DeepEqual(a, b)
+	return false
 }
 
 func decodeInvokeV2(raw []byte, generation uint64) (struct {

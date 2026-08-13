@@ -346,6 +346,11 @@ func TestStrictHostCallHostileActual(t *testing.T) {
 		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":null,"result":{}}}`,
 		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{},"x":1}}`,
 		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","id":"h1","ok":true,"result":{}}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1"}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":null}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","result":{}}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"wrong","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"wrong","ok":true,"result":{}}}`,
 		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":"x","result":{}}}`,
 		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":null}}`,
 		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{},"error":null}}`,
@@ -359,15 +364,18 @@ func TestStrictHostCallHostileActual(t *testing.T) {
 		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}} trailing`,
 		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{"x":"` + strings.Repeat("x", DefaultMaxHostResponseBytes) + `"}}}`,
 	}
-	for _, raw := range frames {
-		var out bytes.Buffer
-		h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: io.NopCloser(strings.NewReader(raw + "\n"))}, 1, "i")
-		if _, _, err := h.KVGet(context.Background(), "k"); err == nil {
-			t.Fatal("hostile response accepted")
-		}
-		if out.Len() == 0 {
-			t.Fatal("expected attempted call")
-		}
+	for i, raw := range frames {
+		raw := raw
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			var out bytes.Buffer
+			h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: io.NopCloser(strings.NewReader(raw + "\n"))}, 1, "i")
+			if _, _, err := h.KVGet(context.Background(), "k"); err == nil {
+				t.Fatal("hostile response accepted")
+			}
+			if out.Len() == 0 {
+				t.Fatal("expected attempted call")
+			}
+		})
 	}
 }
 
@@ -586,6 +594,9 @@ func TestNewInvocationHostClientRejectsZeroCorrelation(t *testing.T) {
 		if h.Available() {
 			t.Fatalf("zero correlation accepted: gen=%d id=%q", tc.gen, tc.id)
 		}
+		if _, err := h.Call(context.Background(), "kv.get", map[string]any{"key": "k"}); err == nil {
+			t.Fatal("zero correlation call unexpectedly succeeded")
+		}
 	}
 }
 
@@ -773,6 +784,18 @@ func FuzzStrictV2Decoder(f *testing.F) {
 		frame, err := decodeInvokeV2(raw, 1)
 		if err == nil && (frame.Protocol != 2 || frame.Kind != "invoke" || frame.Generation != 1 || frame.InvocationID == "" || frame.Request == nil) {
 			t.Fatalf("semantic decoder accepted invalid frame")
+		}
+	})
+}
+
+func FuzzStrictHostResponseValidation(f *testing.F) {
+	f.Add([]byte(`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`))
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		var out bytes.Buffer
+		h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: io.NopCloser(bytes.NewReader(append(raw, '\n')))}, 1, "i")
+		_, err := h.Call(context.Background(), "kv.get", map[string]any{"key": "k"})
+		if err == nil && out.Len() == 0 {
+			t.Fatal("accepted strict response without emitting host_call")
 		}
 	})
 }

@@ -291,6 +291,41 @@ func TestStrictHostCallUsesOuterCorrelationOnly(t *testing.T) {
 	}
 }
 
+func TestCanonicalV2GoldenFrames(t *testing.T) {
+	b, err := os.ReadFile("testdata/stdio-json-v2-runtime-ready.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(lines) != 6 {
+		t.Fatalf("golden lines=%d", len(lines))
+	}
+	if strings.Contains(string(b), `"generation":7,"invocation_id":"inv-1","method"`) {
+		t.Fatal("nested correlation in golden")
+	}
+	if !strings.Contains(lines[2], `"kind":"host_call"`) || !strings.Contains(lines[3], `"kind":"host_response"`) {
+		t.Fatal("missing host frames")
+	}
+}
+
+func TestDecodeInvokeV2HostileMatrix(t *testing.T) {
+	base := `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{}}`
+	for _, tc := range []struct{ name, raw string }{
+		{"unknown", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{},"x":1}`},
+		{"missing", `{"protocol":2,"kind":"invoke","generation":1,"request":{}}`},
+		{"null", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":null}`},
+		{"trailing", base + ` {}`},
+		{"wrong_generation", `{"protocol":2,"kind":"invoke","generation":2,"invocation_id":"i","request":{}}`},
+		{"duplicate", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","invocation_id":"j","request":{}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := decodeInvokeV2([]byte(tc.raw), 1); err == nil {
+				t.Fatal("accepted hostile frame")
+			}
+		})
+	}
+}
+
 func TestServeV2AllowsNilHost(t *testing.T) {
 	var out bytes.Buffer
 	rt := &Runtime{In: strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{}}

@@ -3,4 +3,5 @@
 {"protocol":2,"kind":"host_call","generation":7,"invocation_id":"inv-1","host_call_id":"h1","host_call":{"id":"h1","method":"kv.get","params":{"key":"k"}}}
 {"protocol":2,"kind":"host_response","generation":7,"invocation_id":"inv-1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":"v"}}
 {"protocol":2,"kind":"invoke_result","generation":7,"invocation_id":"inv-1","response":{"ok":true}}
+{"protocol":2,"kind":"stderr_complete","generation":7,"invocation_id":"inv-1"}
 {"protocol":2,"kind":"invoke_ready","generation":7,"invocation_id":"inv-1"}

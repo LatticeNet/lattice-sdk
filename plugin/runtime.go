@@ -17,7 +17,8 @@ const (
 	ActionCall     = "call"
 	ActionExecute  = "execute"
 
-	DefaultMaxRequestBytes = 1 << 20
+	DefaultMaxRequestBytes     = 1 << 20
+	StderrCompleteMarkerPrefix = "\x1eLATTICE_STDERR_V2_COMPLETE "
 )
 
 type Request struct {
@@ -101,6 +102,7 @@ func (f HandlerFunc) HandlePluginRequest(ctx context.Context, req Request, host 
 type Runtime struct {
 	In              io.Reader
 	Out             io.Writer
+	Err             io.Writer
 	Host            *HostClient
 	MaxRequestBytes int
 	closeHost       func()
@@ -110,6 +112,7 @@ type Runtime struct {
 type RuntimeOptions struct {
 	In              io.Reader
 	Out             io.Writer
+	Err             io.Writer
 	Host            *HostClient
 	MaxRequestBytes int
 	OpenHostFromEnv bool
@@ -146,6 +149,11 @@ func (s *V2Session) Accept(kind string, generation uint64, invocation string) er
 		}
 		s.state = "result"
 	case "result":
+		if kind != "stderr_complete" || invocation != s.invocation {
+			return ErrV2Protocol
+		}
+		s.state = "stderr_complete"
+	case "stderr_complete":
 		if kind != "invoke_ready" || invocation != s.invocation {
 			return ErrV2Protocol
 		}
@@ -229,6 +237,9 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 		if err := session.Accept("invoke_result", frame.Generation, frame.InvocationID); err != nil {
 			return err
 		}
+		if err := session.Accept("stderr_complete", frame.Generation, frame.InvocationID); err != nil {
+			return err
+		}
 		if err := session.Accept("invoke_ready", frame.Generation, frame.InvocationID); err != nil {
 			return err
 		}
@@ -240,6 +251,16 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 			Response     Response `json:"response"`
 		}{2, "invoke_result", generation, frame.InvocationID, resp}
 		if err := rt.emitV2(out); err != nil {
+			return err
+		}
+		if rt.Err != nil {
+			if _, err := fmt.Fprintf(rt.Err, "%s%d %s\n", StderrCompleteMarkerPrefix, generation, frame.InvocationID); err != nil {
+				return fmt.Errorf("write stderr completion marker: %w", err)
+			}
+		}
+		ready.InvocationID = frame.InvocationID
+		ready.Kind = "stderr_complete"
+		if err := rt.emitV2(ready); err != nil {
 			return err
 		}
 		ready.InvocationID = frame.InvocationID
@@ -313,6 +334,10 @@ func NewRuntime(opts RuntimeOptions) *Runtime {
 	if out == nil {
 		out = os.Stdout
 	}
+	errOut := opts.Err
+	if errOut == nil {
+		errOut = os.Stderr
+	}
 	maxRequestBytes := opts.MaxRequestBytes
 	if maxRequestBytes <= 0 {
 		maxRequestBytes = DefaultMaxRequestBytes
@@ -325,6 +350,7 @@ func NewRuntime(opts RuntimeOptions) *Runtime {
 	return &Runtime{
 		In:              in,
 		Out:             out,
+		Err:             errOut,
 		Host:            host,
 		MaxRequestBytes: maxRequestBytes,
 		closeHost:       closeHost,

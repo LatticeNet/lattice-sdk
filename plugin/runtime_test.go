@@ -458,7 +458,7 @@ func TestCanonicalV2GoldenFrames(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
-	if len(lines) != 6 {
+	if len(lines) != 7 {
 		t.Fatalf("golden lines=%d", len(lines))
 	}
 	if strings.Contains(string(b), `"generation":7,"invocation_id":"inv-1","method"`) {
@@ -471,14 +471,18 @@ func TestCanonicalV2GoldenFrames(t *testing.T) {
 
 func TestRuntimeGoldenHasExactLifecycleKinds(t *testing.T) {
 	var out bytes.Buffer
+	var stderr bytes.Buffer
 	rt := &Runtime{In: strings.NewReader(`{"protocol":2,"kind":"invoke","generation":7,"invocation_id":"inv-1","request":{}}
-`), Out: &out}
+`), Out: &out, Err: &stderr}
 	if err := rt.ServeV2(context.Background(), HandlerFunc(func(context.Context, Request, *HostClient) Response { return Response{OK: true} }), 7); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(lines) != 3 || !strings.Contains(lines[0], `"runtime_ready"`) || !strings.Contains(lines[1], `"invoke_result"`) || !strings.Contains(lines[2], `"invoke_ready"`) {
+	if len(lines) != 4 || !strings.Contains(lines[0], `"runtime_ready"`) || !strings.Contains(lines[1], `"invoke_result"`) || !strings.Contains(lines[2], `"stderr_complete"`) || !strings.Contains(lines[3], `"invoke_ready"`) {
 		t.Fatalf("lifecycle=%q", out.String())
+	}
+	if stderr.String() != StderrCompleteMarkerPrefix+"7 inv-1\n" {
+		t.Fatalf("stderr marker=%q", stderr.String())
 	}
 }
 
@@ -497,7 +501,7 @@ func TestRuntimeGoldenExactLifecycleOutput(t *testing.T) {
 	if err := rt.ServeV2(context.Background(), HandlerFunc(func(context.Context, Request, *HostClient) Response { return Response{OK: true} }), 7); err != nil {
 		t.Fatal(err)
 	}
-	want := lines[0] + "\n" + strings.Replace(lines[4], `"response":{"ok":true}`, `"response":{"ok":true}`, 1) + "\n" + lines[5] + "\n"
+	want := lines[0] + "\n" + lines[4] + "\n" + lines[5] + "\n" + lines[6] + "\n"
 	if out.String() != want {
 		t.Fatalf("generated lifecycle=%q want=%q", out.String(), want)
 	}
@@ -530,7 +534,7 @@ func TestRuntimeGoldenHostKVExact(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(got) != 4 || got[0]+"\n"+got[1]+"\n"+got[2]+"\n"+got[3]+"\n" != lines[0]+"\n"+lines[2]+"\n"+lines[4]+"\n"+lines[5]+"\n" {
+	if len(got) != 5 || strings.Join(got, "\n")+"\n" != lines[0]+"\n"+lines[2]+"\n"+lines[4]+"\n"+lines[5]+"\n"+lines[6]+"\n" {
 		t.Fatalf("unexpected output %q", out.String())
 	}
 }

@@ -364,9 +364,14 @@ func TestStrictHostCallHostileActual(t *testing.T) {
 		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}} trailing`,
 		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{"x":"` + strings.Repeat("x", DefaultMaxHostResponseBytes) + `"}}}`,
 	}
+	names := []string{"duplicate_root", "unknown_root", "missing_nested_result", "wrong_generation", "missing_protocol", "missing_kind", "missing_generation", "missing_invocation", "missing_call_id", "wrong_call_id", "missing_nested_id", "null_nested_ok", "union_result_error", "unknown_nested", "duplicate_nested", "missing_host_response", "null_host_response", "missing_nested_ok", "wrong_invocation", "wrong_nested_id", "failure_result_present", "success_result_null", "success_error_null", "success_error_nonempty", "failure_error_empty", "failure_error_null", "failure_error_nonstring", "failure_result_null", "wrong_protocol", "wrong_kind", "trailing", "oversize"}
 	for i, raw := range frames {
 		raw := raw
-		t.Run(strconv.Itoa(i), func(t *testing.T) {
+		name := strconv.Itoa(i)
+		if i < len(names) {
+			name = names[i]
+		}
+		t.Run(name, func(t *testing.T) {
 			var out bytes.Buffer
 			h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: io.NopCloser(strings.NewReader(raw + "\n"))}, 1, "i")
 			if _, _, err := h.KVGet(context.Background(), "k"); err == nil {
@@ -590,12 +595,16 @@ func TestNewInvocationHostClientRejectsZeroCorrelation(t *testing.T) {
 		id  string
 	}{{0, "inv"}, {1, ""}} {
 		pr, _ := io.Pipe()
-		h := NewInvocationHostClient(HostClientOptions{Output: io.Discard, Responses: pr}, tc.gen, tc.id)
+		var out bytes.Buffer
+		h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: pr}, tc.gen, tc.id)
 		if h.Available() {
 			t.Fatalf("zero correlation accepted: gen=%d id=%q", tc.gen, tc.id)
 		}
 		if _, err := h.Call(context.Background(), "kv.get", map[string]any{"key": "k"}); err == nil {
 			t.Fatal("zero correlation call unexpectedly succeeded")
+		}
+		if out.Len() != 0 {
+			t.Fatalf("zero correlation emitted %d bytes", out.Len())
 		}
 	}
 }
@@ -793,9 +802,11 @@ func FuzzStrictHostResponseValidation(f *testing.F) {
 	f.Fuzz(func(t *testing.T, raw []byte) {
 		var out bytes.Buffer
 		h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: io.NopCloser(bytes.NewReader(append(raw, '\n')))}, 1, "i")
-		_, err := h.Call(context.Background(), "kv.get", map[string]any{"key": "k"})
-		if err == nil && out.Len() == 0 {
-			t.Fatal("accepted strict response without emitting host_call")
+		result, err := h.Call(context.Background(), "kv.get", map[string]any{"key": "k"})
+		if err == nil {
+			if len(result) == 0 || out.Len() == 0 {
+				t.Fatal("successful strict response lacked result or host_call")
+			}
 		}
 	})
 }

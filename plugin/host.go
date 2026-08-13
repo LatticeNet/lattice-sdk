@@ -36,6 +36,7 @@ var ErrHostUnavailable = errors.New("host response fd unavailable")
 type HostClient struct {
 	output           io.Writer
 	responses        *bufio.Scanner
+	transport        *hostTransport
 	maxResponseBytes int
 
 	mu           sync.Mutex
@@ -47,6 +48,13 @@ type HostClient struct {
 	invocationID string
 	expired      atomic.Bool
 	strict       bool
+}
+
+type hostTransport struct {
+	output    io.Writer
+	responses *bufio.Scanner
+	writeMu   sync.Mutex
+	readMu    sync.Mutex
 }
 
 var ErrHostClientExpired = errors.New("invocation host client expired")
@@ -71,6 +79,7 @@ func NewHostClient(opts HostClientOptions) *HostClient {
 		scanner.Buffer(make([]byte, 0, 64*1024), maxResponseBytes)
 		client.responses = scanner
 	}
+	client.transport = &hostTransport{output: client.output, responses: client.responses}
 	return client
 }
 
@@ -81,6 +90,13 @@ func NewInvocationHostClient(opts HostClientOptions, generation uint64, invocati
 	c.generation, c.invocationID = generation, invocationID
 	c.strict = true
 	return c
+}
+
+func (c *HostClient) scoped(generation uint64, invocationID string) *HostClient {
+	if c == nil {
+		return nil
+	}
+	return &HostClient{output: c.output, responses: c.responses, transport: c.transport, maxResponseBytes: c.maxResponseBytes, generation: generation, invocationID: invocationID, strict: true}
 }
 
 func (c *HostClient) Expire() {
@@ -131,34 +147,39 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 
 	c.nextID++
 	id := fmt.Sprintf("h%d", c.nextID)
-	c.writeMu.Lock()
+	t := c.transport
+	if t == nil {
+		t = &hostTransport{output: c.output, responses: c.responses}
+		c.transport = t
+	}
+	t.writeMu.Lock()
 	if c.expired.Load() {
-		c.writeMu.Unlock()
+		t.writeMu.Unlock()
 		c.leaseMu.Unlock()
 		return nil, ErrHostClientExpired
 	}
-	if err := json.NewEncoder(c.output).Encode(hostCallEnvelope{
+	if err := json.NewEncoder(t.output).Encode(hostCallEnvelope{
 		HostCall: hostCall{ID: id, HostCallID: id, Generation: c.generation, InvocationID: c.invocationID, Method: method, Params: params},
 	}); err != nil {
-		c.writeMu.Unlock()
+		t.writeMu.Unlock()
 		c.leaseMu.Unlock()
 		return nil, fmt.Errorf("write host_call: %w", err)
 	}
-	c.writeMu.Unlock()
+	t.writeMu.Unlock()
 	c.leaseMu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	c.readMu.Lock()
-	defer c.readMu.Unlock()
-	if !c.responses.Scan() {
-		if err := c.responses.Err(); err != nil {
+	t.readMu.Lock()
+	defer t.readMu.Unlock()
+	if !t.responses.Scan() {
+		if err := t.responses.Err(); err != nil {
 			return nil, fmt.Errorf("read host_response: %w", err)
 		}
 		return nil, errors.New("read host_response: eof")
 	}
 	var env hostResponseEnvelope
-	if err := json.Unmarshal(c.responses.Bytes(), &env); err != nil {
+	if err := json.Unmarshal(t.responses.Bytes(), &env); err != nil {
 		return nil, fmt.Errorf("decode host_response: %w", err)
 	}
 	if env.HostResponse.ID != id {

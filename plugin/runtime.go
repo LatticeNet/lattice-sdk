@@ -177,6 +177,7 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 		Generation   uint64 `json:"generation"`
 		InvocationID string `json:"invocation_id"`
 	}{2, "runtime_ready", generation, "runtime"}
+	session := NewV2Session(generation)
 	if err := json.NewEncoder(rt.Out).Encode(ready); err != nil {
 		return err
 	}
@@ -194,7 +195,15 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 		if err := json.Unmarshal(scanner.Bytes(), &frame); err != nil || frame.Protocol != 2 || frame.Generation != generation || frame.Kind != "invoke" || frame.InvocationID == "" {
 			return fmt.Errorf("invalid stdio-json-v2 frame")
 		}
-		resp := handler.HandlePluginRequest(ctx, frame.Request, rt.Host)
+		if err := session.Accept("invoke", frame.Generation, frame.InvocationID); err != nil {
+			return err
+		}
+		invHost := rt.Host
+		if rt.Host != nil {
+			invHost = &HostClient{output: rt.Host.output, responses: rt.Host.responses, maxResponseBytes: rt.Host.maxResponseBytes, generation: generation, invocationID: frame.InvocationID, strict: true}
+		}
+		resp := handler.HandlePluginRequest(ctx, frame.Request, invHost)
+		invHost.Expire()
 		out := struct {
 			Protocol     int      `json:"protocol"`
 			Kind         string   `json:"kind"`
@@ -208,6 +217,12 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 		ready.InvocationID = frame.InvocationID
 		ready.Kind = "invoke_ready"
 		if err := json.NewEncoder(rt.Out).Encode(ready); err != nil {
+			return err
+		}
+		if err := session.Accept("invoke_result", frame.Generation, frame.InvocationID); err != nil {
+			return err
+		}
+		if err := session.Accept("invoke_ready", frame.Generation, frame.InvocationID); err != nil {
 			return err
 		}
 	}

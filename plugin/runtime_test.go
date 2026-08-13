@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestV2SessionRejectsStaleDuplicateAndLate(t *testing.T) {
@@ -301,6 +302,31 @@ func TestStrictHostResponseRejectsWrongOuterCorrelation(t *testing.T) {
 	}
 }
 
+func TestCancelledHostCallAbortsAndLateCallIsSilent(t *testing.T) {
+	var out bytes.Buffer
+	pr, pw := io.Pipe()
+	h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: pr}, 1, "i")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { _, _, err := h.KVGet(ctx, "k"); done <- err }()
+	time.Sleep(10 * time.Millisecond)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("cancelled call hung")
+	}
+	h.Expire()
+	before := out.Len()
+	if _, _, err := h.KVGet(context.Background(), "late"); err == nil {
+		t.Fatal("late call accepted")
+	}
+	if out.Len() != before {
+		t.Fatal("late call emitted bytes")
+	}
+	_ = pw.Close()
+}
+
 func TestCanonicalV2GoldenFrames(t *testing.T) {
 	b, err := os.ReadFile("testdata/stdio-json-v2-runtime-ready.jsonl")
 	if err != nil {
@@ -351,6 +377,20 @@ func TestServeV2AllowsNilHost(t *testing.T) {
 		return Response{OK: true}
 	}), 1); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestServeV2TwoInvocationsReuseRuntimeTransport(t *testing.T) {
+	input := strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"a","request":{}}
+{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"b","request":{}}
+`)
+	var out bytes.Buffer
+	rt := &Runtime{In: input, Out: &out}
+	if err := rt.ServeV2(context.Background(), HandlerFunc(func(context.Context, Request, *HostClient) Response { return Response{OK: true} }), 1); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(out.String(), `"kind":"invoke_ready"`) != 2 {
+		t.Fatalf("ready count=%d", strings.Count(out.String(), `"kind":"invoke_ready"`))
 	}
 }
 

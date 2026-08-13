@@ -284,8 +284,8 @@ func TestServeV2RejectsDuplicateJSONKeys(t *testing.T) {
 
 func TestStrictHostCallUsesOuterCorrelationOnly(t *testing.T) {
 	var out bytes.Buffer
-	h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: strings.NewReader(`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}
-`)}, 1, "i")
+	h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: io.NopCloser(strings.NewReader(`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}
+`))}, 1, "i")
 	if _, _, err := h.KVGet(context.Background(), "k"); err != nil {
 		t.Fatalf("canonical response rejected: %v", err)
 	}

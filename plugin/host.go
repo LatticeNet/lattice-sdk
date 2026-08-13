@@ -92,6 +92,11 @@ func NewHostClient(opts HostClientOptions) *HostClient {
 // worker emits invoke_ready so late plugin calls cannot reach the host.
 func NewInvocationHostClient(opts HostClientOptions, generation uint64, invocationID string) *HostClient {
 	c := NewHostClient(opts)
+	if _, ok := opts.Responses.(io.Closer); !ok {
+		c.output = nil
+		c.responses = nil
+		c.transport = nil
+	}
 	c.generation, c.invocationID = generation, invocationID
 	c.strict = true
 	return c
@@ -198,7 +203,11 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 	}
 	var frame any = hostCallEnvelope{HostCall: hostCall{ID: id, Method: method, Params: params}}
 	if c.strict {
-		frame = hostCallEnvelope{Protocol: 2, Kind: "host_call", Generation: c.generation, InvocationID: c.invocationID, HostCallID: id, HostCall: hostCall{ID: id, Method: method, Params: params}}
+		if method == "" || params == nil {
+			t.writeMu.Unlock()
+			return nil, fmt.Errorf("invalid strict host_call payload")
+		}
+		frame = strictHostCallEnvelope{Protocol: 2, Kind: "host_call", Generation: c.generation, InvocationID: c.invocationID, HostCallID: id, HostCall: strictHostCallPayload{ID: id, Method: method, Params: params}}
 	}
 	if err := json.NewEncoder(t.output).Encode(frame); err != nil {
 		t.writeMu.Unlock()
@@ -267,6 +276,20 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 		return nil, fmt.Errorf("%s: %s", method, message)
 	}
 	return append(json.RawMessage(nil), env.HostResponse.Result...), nil
+}
+
+type strictHostCallEnvelope struct {
+	Protocol     uint64                `json:"protocol"`
+	Kind         string                `json:"kind"`
+	Generation   uint64                `json:"generation"`
+	InvocationID string                `json:"invocation_id"`
+	HostCallID   string                `json:"host_call_id"`
+	HostCall     strictHostCallPayload `json:"host_call"`
+}
+type strictHostCallPayload struct {
+	ID     string `json:"id"`
+	Method string `json:"method"`
+	Params any    `json:"params"`
 }
 
 func strictDecodeFrame(raw []byte, dst any) error {

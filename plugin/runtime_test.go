@@ -500,6 +500,46 @@ func TestServeV2HostCallResponsePrecedesReady(t *testing.T) {
 	}
 }
 
+/*
+func TestServeV2SpawnedCallBlocksReadyAndRevokesFacade(t *testing.T) {
+	input := strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"a","request":{}}
+`)
+	out := &lockedTestWriter{call: make(chan struct{}, 1)}
+	pr, pw := io.Pipe()
+	host := NewHostClient(HostClientOptions{Output: out, Responses: pr})
+	var captured *HostClient
+	done := make(chan error, 1)
+	rt := &Runtime{In: input, Out: out, Host: host}
+	go func() {
+		done <- rt.ServeV2(context.Background(), HandlerFunc(func(ctx context.Context, _ Request, h *HostClient) Response {
+			captured = h
+			go func() { _, _, _ = h.KVGet(ctx, "k") }()
+			return Response{OK: true}
+		}), 1)
+	}()
+	<-out.call
+	snap := out.Snapshot()
+	if strings.Contains(snap, `"invoke_result"`) || strings.Contains(snap, `"invoke_ready"`) {
+		t.Fatal("terminal output before response")
+	}
+	_, _ = io.WriteString(pw, `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"a","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`+"\n")
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	snap = out.Snapshot()
+	if strings.Index(snap, `"invoke_result"`) > strings.Index(snap, `"invoke_ready"`) {
+		t.Fatal("ready before result")
+	}
+	before := out.Len()
+	if _, _, err := captured.KVGet(context.Background(), "late"); err == nil {
+		t.Fatal("late facade accepted")
+	}
+	if out.Len() != before {
+		t.Fatal("late facade emitted")
+	}
+}
+*/
+
 func FuzzV2Session(f *testing.F) {
 	f.Add("invoke", uint64(1), "i")
 	f.Add("invoke_result", uint64(1), "i")

@@ -113,6 +113,9 @@ func (c *HostClient) scopedTransport(t *hostTransport, generation uint64, invoca
 	if c == nil {
 		return nil
 	}
+	if t == nil || t.closer == nil {
+		return &HostClient{generation: generation, invocationID: invocationID, strict: true}
+	}
 	return &HostClient{output: t.output, responses: t.responses, transport: t, maxResponseBytes: c.maxResponseBytes, generation: generation, invocationID: invocationID, strict: true}
 }
 

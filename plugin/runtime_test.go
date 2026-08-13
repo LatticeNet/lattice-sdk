@@ -457,10 +457,9 @@ func TestRuntimeGoldenExactLifecycleOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := lines[0] + "\n" + strings.Replace(lines[4], `"response":{"ok":true}`, `"response":{"ok":true}`, 1) + "\n" + lines[5] + "\n"
-	if !strings.Contains(out.String(), `"runtime_ready"`) || !strings.Contains(out.String(), `"invoke_result"`) {
-		t.Fatal("missing lifecycle")
+	if out.String() != want {
+		t.Fatalf("generated lifecycle=%q want=%q", out.String(), want)
 	}
-	_ = want
 }
 
 func TestServeV2NonclosableHostFailsFacadeClosed(t *testing.T) {

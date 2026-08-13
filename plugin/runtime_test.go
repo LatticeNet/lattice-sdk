@@ -379,15 +379,20 @@ func TestStrictHostCallHostileActual(t *testing.T) {
 			name = names[i]
 		}
 		t.Run(name, func(t *testing.T) {
-			var out bytes.Buffer
-			h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: io.NopCloser(strings.NewReader(raw + "\n"))}, 1, "i")
-			if _, _, err := h.KVGet(context.Background(), "k"); err == nil {
-				t.Fatal("hostile response accepted")
-			}
-			if out.Len() == 0 {
-				t.Fatal("expected attempted call")
-			}
+			assertHostCallRejected(t, raw)
 		})
+	}
+}
+
+func assertHostCallRejected(t *testing.T, raw string) {
+	t.Helper()
+	var out bytes.Buffer
+	h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: io.NopCloser(strings.NewReader(raw + "\n"))}, 1, "i")
+	if _, _, err := h.KVGet(context.Background(), "k"); err == nil {
+		t.Fatal("hostile response accepted")
+	}
+	if out.Len() == 0 {
+		t.Fatal("expected attempted call")
 	}
 }
 
@@ -808,8 +813,25 @@ func FuzzStrictHostResponseValidation(f *testing.F) {
 	valid := []byte(`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`)
 	f.Add(valid)
 	f.Fuzz(func(t *testing.T, raw []byte) {
+		payload := json.RawMessage(raw)
+		if !json.Valid(payload) {
+			payload = json.RawMessage(`{"x":1}`)
+		}
+		base := string(payload)
+		for _, hostile := range []string{
+			`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","protocol":2,"host_response":{"id":"h1","ok":true,"result":` + base + `}}`,
+			`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","unknown":1,"host_response":{"id":"h1","ok":true,"result":` + base + `}}`,
+			`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":` + base + `,"unknown":1}}`,
+			`{"protocol":null,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":` + base + `}}`,
+			`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"wrong","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":` + base + `}}`,
+			`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"wrong","ok":true,"result":` + base + `}}`,
+			`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false}}`,
+		} {
+			assertHostCallRejected(t, hostile)
+		}
 		var out bytes.Buffer
-		h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: io.NopCloser(bytes.NewReader(append(raw, '\n')))}, 1, "i")
+		success := `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":` + string(payload) + `}}` + "\n"
+		h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: io.NopCloser(strings.NewReader(success))}, 1, "i")
 		result, err := h.Call(context.Background(), "kv.get", map[string]any{"key": "k"})
 		if err == nil {
 			if len(result) == 0 || out.Len() == 0 {

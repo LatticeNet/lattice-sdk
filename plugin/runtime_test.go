@@ -841,10 +841,8 @@ func FuzzStrictHostResponseValidation(f *testing.F) {
 		if !bytes.Equal(result, payload) {
 			t.Fatalf("result=%s want=%s", result, payload)
 		}
-		if err == nil {
-			if len(result) == 0 || out.Len() == 0 {
-				t.Fatal("successful strict response lacked result or host_call")
-			}
+		if len(result) == 0 || out.Len() == 0 {
+			t.Fatal("successful strict response lacked result or host_call")
 		}
 	})
 }

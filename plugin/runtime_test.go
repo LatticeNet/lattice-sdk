@@ -331,56 +331,49 @@ func TestStrictHostResponseHostileMatrix(t *testing.T) {
 }
 
 func TestStrictHostCallHostileActual(t *testing.T) {
-	frames := []string{
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_call_id":"h2","host_response":{"id":"h1","ok":true,"result":{}}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","x":1,"host_response":{"id":"h1","ok":true,"result":{}}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true}}`,
-		`{"protocol":2,"kind":"host_response","generation":2,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
-		`{"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
-		`{"protocol":2,"generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
-		`{"protocol":2,"kind":"host_response","invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_response":{"id":"h1","ok":true,"result":{}}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"bad","host_response":{"id":"h1","ok":true,"result":{}}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"ok":true,"result":{}}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":null,"result":{}}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{},"x":1}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","id":"h1","ok":true,"result":{}}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1"}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":null}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","result":{}}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"wrong","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"wrong","ok":true,"result":{}}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":"x","result":{}}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":null}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{},"error":null}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{},"error":"bad"}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":""}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":null}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":3}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":"x","result":null}}`,
-		`{"protocol":null,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
-		`{"protocol":2,"kind":null,"generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
-		`{"protocol":2,"kind":"host_response","generation":null,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":null,"host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":null,"host_response":{"id":"h1","ok":true,"result":{}}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":null,"ok":true,"result":{}}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false}}`,
-		`{"protocol":1,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
-		`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}} trailing`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{"x":"` + strings.Repeat("x", DefaultMaxHostResponseBytes) + `"}}}`,
+	cases := []struct{ name, raw string }{
+		{"duplicate_root", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_call_id":"h2","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"unknown_root", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","x":1,"host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"missing_nested_result", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true}}`},
+		{"wrong_generation", `{"protocol":2,"kind":"host_response","generation":2,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"missing_protocol", `{"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"missing_kind", `{"protocol":2,"generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"missing_generation", `{"protocol":2,"kind":"host_response","invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"missing_invocation", `{"protocol":2,"kind":"host_response","generation":1,"host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"missing_call_id", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"wrong_call_id", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"bad","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"missing_nested_id", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"ok":true,"result":{}}}`},
+		{"null_nested_ok", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":null,"result":{}}}`},
+		{"unknown_nested", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{},"x":1}}`},
+		{"duplicate_nested", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","id":"h1","ok":true,"result":{}}}`},
+		{"missing_host_response", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1"}`},
+		{"null_host_response", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":null}`},
+		{"missing_nested_ok", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","result":{}}}`},
+		{"wrong_invocation", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"wrong","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"wrong_nested_id", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"wrong","ok":true,"result":{}}}`},
+		{"union_result_error", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":"x","result":{}}}`},
+		{"failure_result_present", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":"x","result":{}}}`},
+		{"success_result_null", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":null}}`},
+		{"success_error_null", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{},"error":null}}`},
+		{"success_error_nonempty", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{},"error":"bad"}}`},
+		{"failure_error_empty", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":""}}`},
+		{"failure_error_null", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":null}}`},
+		{"failure_error_nonstring", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":3}}`},
+		{"failure_result_null", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":"x","result":null}}`},
+		{"null_protocol", `{"protocol":null,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"null_kind", `{"protocol":2,"kind":null,"generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"null_generation", `{"protocol":2,"kind":"host_response","generation":null,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"null_invocation", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":null,"host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"null_call_id", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":null,"host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"null_nested_id", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":null,"ok":true,"result":{}}}`},
+		{"missing_failure_error", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false}}`},
+		{"wrong_protocol", `{"protocol":1,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"wrong_kind", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"trailing", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}} trailing`},
+		{"oversize", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{"x":"` + strings.Repeat("x", DefaultMaxHostResponseBytes) + `"}}}`},
 	}
-	names := []string{"duplicate_root", "unknown_root", "missing_nested_result", "wrong_generation", "missing_protocol", "missing_kind", "missing_generation", "missing_invocation", "missing_call_id", "wrong_call_id", "missing_nested_id", "null_nested_ok", "union_result_error", "unknown_nested", "duplicate_nested", "missing_host_response", "null_host_response", "missing_nested_ok", "wrong_invocation", "wrong_nested_id", "failure_result_present", "success_result_null", "success_error_null", "success_error_nonempty", "failure_error_empty", "failure_error_null", "failure_error_nonstring", "failure_result_null", "wrong_protocol", "wrong_kind", "trailing", "oversize", "null_protocol", "null_kind", "null_generation", "null_invocation", "null_call_id", "null_nested_id", "missing_failure_error"}
-	for i, raw := range frames {
-		raw := raw
-		name := strconv.Itoa(i)
-		if i < len(names) {
-			name = names[i]
-		}
-		t.Run(name, func(t *testing.T) {
-			assertHostCallRejected(t, raw)
-		})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) { assertHostCallRejected(t, tc.raw) })
 	}
 }
 
@@ -814,8 +807,15 @@ func FuzzStrictHostResponseValidation(f *testing.F) {
 	f.Add(valid)
 	f.Fuzz(func(t *testing.T, raw []byte) {
 		payload := json.RawMessage(raw)
-		if !json.Valid(payload) {
+		var semantic any
+		if !json.Valid(payload) || json.Unmarshal(payload, &semantic) != nil {
 			payload = json.RawMessage(`{"x":1}`)
+		} else {
+			var compact bytes.Buffer
+			if err := json.Compact(&compact, payload); err != nil {
+				t.Fatal(err)
+			}
+			payload = json.RawMessage(compact.Bytes())
 		}
 		base := string(payload)
 		for _, hostile := range []string{

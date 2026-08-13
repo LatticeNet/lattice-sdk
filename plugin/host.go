@@ -255,10 +255,14 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 			return nil, fmt.Errorf("decode host_response: %w", err)
 		}
 		env.Protocol, env.Kind, env.Generation, env.InvocationID, env.HostCallID = strictEnv.Protocol, strictEnv.Kind, strictEnv.Generation, strictEnv.InvocationID, strictEnv.HostCallID
-		if strictEnv.HostResponse.OK == nil || strictEnv.HostResponse.Result == nil {
+		if strictEnv.HostResponse.OK == nil || (*strictEnv.HostResponse.OK && strictEnv.HostResponse.Result == nil) {
 			return nil, fmt.Errorf("decode host_response: missing required payload")
 		}
-		env.HostResponse = hostResponse{ID: strictEnv.HostResponse.ID, OK: *strictEnv.HostResponse.OK, Result: *strictEnv.HostResponse.Result, Error: strictEnv.HostResponse.Error}
+		var result json.RawMessage
+		if strictEnv.HostResponse.Result != nil {
+			result = *strictEnv.HostResponse.Result
+		}
+		env.HostResponse = hostResponse{ID: strictEnv.HostResponse.ID, OK: *strictEnv.HostResponse.OK, Result: result, Error: strictEnv.HostResponse.Error}
 	} else if err := json.Unmarshal(scanned.raw, &env); err != nil {
 		return nil, fmt.Errorf("decode host_response: %w", err)
 	}

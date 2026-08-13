@@ -329,6 +329,14 @@ func TestStrictHostResponseHostileMatrix(t *testing.T) {
 	}
 }
 
+func TestStrictHostCallErrorWithoutResult(t *testing.T) {
+	h := NewInvocationHostClient(HostClientOptions{Output: io.Discard, Responses: io.NopCloser(strings.NewReader(`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":"denied"}}
+`))}, 1, "i")
+	if _, _, err := h.KVGet(context.Background(), "k"); err == nil || !strings.Contains(err.Error(), "denied") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestV1HostCallWireExact(t *testing.T) {
 	var out bytes.Buffer
 	h := NewHostClient(HostClientOptions{Output: &out, Responses: strings.NewReader(`{"host_response":{"id":"h1","ok":true,"result":{}}}

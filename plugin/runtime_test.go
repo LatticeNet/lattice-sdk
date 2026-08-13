@@ -271,13 +271,25 @@ func TestServeV2RejectsReusedInvocationWithoutDispatch(t *testing.T) {
 	}
 }
 
+func TestServeV2RejectsDuplicateJSONKeys(t *testing.T) {
+	var out bytes.Buffer
+	rt := &Runtime{In: strings.NewReader(`{"protocol":2,"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{}}
+`), Out: &out}
+	if err := rt.ServeV2(context.Background(), HandlerFunc(func(context.Context, Request, *HostClient) Response { t.Fatal("dispatched"); return Response{} }), 1); err == nil {
+		t.Fatal("duplicate frame accepted")
+	}
+}
+
 func TestServeV2AllowsNilHost(t *testing.T) {
 	var out bytes.Buffer
 	rt := &Runtime{In: strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{}}
 `), Out: &out}
 	if err := rt.ServeV2(context.Background(), HandlerFunc(func(_ context.Context, _ Request, host *HostClient) Response {
-		if host != nil {
-			t.Fatal("unexpected host")
+		if host == nil {
+			t.Fatal("expected fail-closed host facade")
+		}
+		if _, _, err := host.KVGet(context.Background(), "x"); err == nil {
+			t.Fatal("nil transport should fail closed")
 		}
 		return Response{OK: true}
 	}), 1); err != nil {

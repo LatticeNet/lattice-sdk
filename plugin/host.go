@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -208,6 +209,9 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 }
 
 func strictDecodeFrame(raw []byte, dst any) error {
+	if err := rejectDuplicateJSONKeys(raw); err != nil {
+		return err
+	}
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
@@ -216,6 +220,53 @@ func strictDecodeFrame(raw []byte, dst any) error {
 	var extra any
 	if err := dec.Decode(&extra); err != io.EOF {
 		return errors.New("trailing frame data")
+	}
+	return nil
+}
+
+func rejectDuplicateJSONKeys(raw []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	var walk func() error
+	walk = func() error {
+		t, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		switch d := t.(type) {
+		case json.Delim:
+			if d == '{' {
+				seen := map[string]bool{}
+				for dec.More() {
+					k, err := dec.Token()
+					if err != nil {
+						return err
+					}
+					key := k.(string)
+					if seen[key] {
+						return fmt.Errorf("duplicate JSON field %q", key)
+					}
+					seen[key] = true
+					if err := walk(); err != nil {
+						return err
+					}
+				}
+				_, err = dec.Token()
+				return err
+			}
+			if d == '[' {
+				for dec.More() {
+					if err := walk(); err != nil {
+						return err
+					}
+				}
+				_, err = dec.Token()
+				return err
+			}
+		}
+		return nil
+	}
+	if err := walk(); err != nil {
+		return err
 	}
 	return nil
 }

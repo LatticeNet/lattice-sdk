@@ -165,6 +165,9 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if generation == 0 {
+		return fmt.Errorf("invalid stdio-json-v2 generation")
+	}
 	scanner := bufio.NewScanner(rt.In)
 	max := rt.MaxRequestBytes
 	if max <= 0 {
@@ -179,6 +182,9 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 	}{2, "runtime_ready", generation, "runtime"}
 	session := NewV2Session(generation)
 	usedInvocations := make(map[string]struct{})
+	if rt.Host != nil && rt.Host.transport != nil {
+		rt.Host.transport.output = rt.Out
+	}
 	if err := rt.emitV2(ready); err != nil {
 		return err
 	}
@@ -206,7 +212,7 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 		if err := session.Accept("invoke", frame.Generation, frame.InvocationID); err != nil {
 			return err
 		}
-		invHost := rt.Host
+		invHost := NewHostClient(HostClientOptions{Output: rt.Out})
 		if rt.Host != nil {
 			invHost = rt.Host.scoped(generation, frame.InvocationID)
 		}

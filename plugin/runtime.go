@@ -103,6 +103,7 @@ type Runtime struct {
 	Host            *HostClient
 	MaxRequestBytes int
 	closeHost       func()
+	v2Transport     *hostTransport
 }
 
 type RuntimeOptions struct {
@@ -182,9 +183,11 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 	}{2, "runtime_ready", generation, "runtime"}
 	session := NewV2Session(generation)
 	usedInvocations := make(map[string]struct{})
+	var serveTransport *hostTransport
 	if rt.Host != nil && rt.Host.transport != nil {
-		rt.Host.transport.output = rt.Out
+		serveTransport = &hostTransport{output: rt.Out, responses: rt.Host.transport.responses}
 	}
+	rt.v2Transport = serveTransport
 	if err := rt.emitV2(ready); err != nil {
 		return err
 	}
@@ -207,8 +210,8 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 			return err
 		}
 		invHost := NewHostClient(HostClientOptions{Output: rt.Out})
-		if rt.Host != nil {
-			invHost = rt.Host.scoped(generation, frame.InvocationID)
+		if rt.Host != nil && serveTransport != nil {
+			invHost = rt.Host.scopedTransport(serveTransport, generation, frame.InvocationID)
 		}
 		resp := handler.HandlePluginRequest(ctx, *frame.Request, invHost)
 		if invHost != nil {
@@ -263,8 +266,8 @@ func decodeInvokeV2(raw []byte, generation uint64) (struct {
 // host_call. This prevents terminal lifecycle frames from overtaking an
 // admitted call when host and runtime share an output stream.
 func (rt *Runtime) emitV2(v any) error {
-	if rt.Host != nil && rt.Host.transport != nil {
-		t := rt.Host.transport
+	if rt.v2Transport != nil {
+		t := rt.v2Transport
 		t.writeMu.Lock()
 		defer t.writeMu.Unlock()
 		return json.NewEncoder(t.output).Encode(v)

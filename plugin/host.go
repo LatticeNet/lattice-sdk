@@ -98,6 +98,13 @@ func (c *HostClient) scoped(generation uint64, invocationID string) *HostClient 
 	return &HostClient{output: c.output, responses: c.responses, transport: c.transport, maxResponseBytes: c.maxResponseBytes, generation: generation, invocationID: invocationID, strict: true}
 }
 
+func (c *HostClient) scopedTransport(t *hostTransport, generation uint64, invocationID string) *HostClient {
+	if c == nil {
+		return nil
+	}
+	return &HostClient{output: t.output, responses: t.responses, transport: t, maxResponseBytes: c.maxResponseBytes, generation: generation, invocationID: invocationID, strict: true}
+}
+
 func (c *HostClient) Expire() {
 	if c != nil {
 		c.leaseMu.Lock()
@@ -181,9 +188,12 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 	}
 	var env hostResponseEnvelope
 	if c.strict {
-		if err := strictDecodeFrame(t.responses.Bytes(), &env); err != nil {
+		var strictEnv strictHostResponseEnvelope
+		if err := strictDecodeFrame(t.responses.Bytes(), &strictEnv); err != nil {
 			return nil, fmt.Errorf("decode host_response: %w", err)
 		}
+		env.Protocol, env.Kind, env.Generation, env.InvocationID, env.HostCallID = strictEnv.Protocol, strictEnv.Kind, strictEnv.Generation, strictEnv.InvocationID, strictEnv.HostCallID
+		env.HostResponse = hostResponse{ID: strictEnv.HostResponse.ID, OK: strictEnv.HostResponse.OK, Result: strictEnv.HostResponse.Result, Error: strictEnv.HostResponse.Error}
 	} else if err := json.Unmarshal(t.responses.Bytes(), &env); err != nil {
 		return nil, fmt.Errorf("decode host_response: %w", err)
 	}
@@ -294,6 +304,21 @@ type hostResponseEnvelope struct {
 	InvocationID string       `json:"invocation_id,omitempty"`
 	HostCallID   string       `json:"host_call_id,omitempty"`
 	HostResponse hostResponse `json:"host_response"`
+}
+
+type strictHostResponseEnvelope struct {
+	Protocol     uint64                    `json:"protocol"`
+	Kind         string                    `json:"kind"`
+	Generation   uint64                    `json:"generation"`
+	InvocationID string                    `json:"invocation_id"`
+	HostCallID   string                    `json:"host_call_id"`
+	HostResponse strictHostResponsePayload `json:"host_response"`
+}
+type strictHostResponsePayload struct {
+	ID     string          `json:"id"`
+	OK     bool            `json:"ok"`
+	Result json.RawMessage `json:"result"`
+	Error  string          `json:"error,omitempty"`
 }
 
 type hostResponse struct {

@@ -280,6 +280,17 @@ func TestServeV2RejectsDuplicateJSONKeys(t *testing.T) {
 	}
 }
 
+func TestStrictHostCallUsesOuterCorrelationOnly(t *testing.T) {
+	var out bytes.Buffer
+	h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: strings.NewReader(`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":null}}
+`)}, 1, "i")
+	_, _, _ = h.KVGet(context.Background(), "k")
+	line := out.String()
+	if strings.Contains(line, `"generation":1,"invocation_id":"i","method"`) {
+		t.Fatalf("nested correlation duplicated: %s", line)
+	}
+}
+
 func TestServeV2AllowsNilHost(t *testing.T) {
 	var out bytes.Buffer
 	rt := &Runtime{In: strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{}}

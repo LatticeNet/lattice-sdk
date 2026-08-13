@@ -40,10 +40,8 @@ type HostClient struct {
 	transport        *hostTransport
 	maxResponseBytes int
 
-	mu           sync.Mutex
 	leaseMu      sync.Mutex
 	pending      sync.WaitGroup
-	nextID       int
 	generation   uint64
 	invocationID string
 	expired      atomic.Bool
@@ -165,7 +163,7 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 	}
 	var frame any = hostCallEnvelope{HostCall: hostCall{ID: id, Method: method, Params: params}}
 	if c.strict {
-		frame = hostCallEnvelope{Protocol: 2, Kind: "host_call", Generation: c.generation, InvocationID: c.invocationID, HostCallID: id, HostCall: hostCall{ID: id, HostCallID: id, Generation: c.generation, InvocationID: c.invocationID, Method: method, Params: params}}
+		frame = hostCallEnvelope{Protocol: 2, Kind: "host_call", Generation: c.generation, InvocationID: c.invocationID, HostCallID: id, HostCall: hostCall{ID: id, Method: method, Params: params}}
 	}
 	if err := json.NewEncoder(t.output).Encode(frame); err != nil {
 		t.writeMu.Unlock()

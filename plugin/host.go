@@ -142,8 +142,8 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 	}
 
 	c.leaseMu.Lock()
+	defer c.leaseMu.Unlock()
 	if c.expired.Load() {
-		c.leaseMu.Unlock()
 		return nil, ErrHostClientExpired
 	}
 	c.pending.Add(1)
@@ -161,7 +161,6 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 	id := fmt.Sprintf("h%d", t.nextID)
 	if c.expired.Load() {
 		t.writeMu.Unlock()
-		c.leaseMu.Unlock()
 		return nil, ErrHostClientExpired
 	}
 	var frame any = hostCallEnvelope{HostCall: hostCall{ID: id, Method: method, Params: params}}
@@ -170,11 +169,9 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 	}
 	if err := json.NewEncoder(t.output).Encode(frame); err != nil {
 		t.writeMu.Unlock()
-		c.leaseMu.Unlock()
 		return nil, fmt.Errorf("write host_call: %w", err)
 	}
 	t.writeMu.Unlock()
-	c.leaseMu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

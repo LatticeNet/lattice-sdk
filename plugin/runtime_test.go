@@ -309,17 +309,9 @@ func FuzzV2Session(f *testing.F) {
 func FuzzStrictV2Decoder(f *testing.F) {
 	f.Add([]byte(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{}}`))
 	f.Fuzz(func(t *testing.T, raw []byte) {
-		var frame struct {
-			Protocol     int      `json:"protocol"`
-			Kind         string   `json:"kind"`
-			Generation   uint64   `json:"generation"`
-			InvocationID string   `json:"invocation_id"`
-			Request      *Request `json:"request"`
-		}
-		if err := strictDecodeFrame(raw, &frame); err == nil {
-			// Structural decoding is separate from lifecycle validation; invalid
-			// zero values are rejected by ServeV2 after this step.
-			_ = frame
+		frame, err := decodeInvokeV2(raw, 1)
+		if err == nil && (frame.Protocol != 2 || frame.Kind != "invoke" || frame.Generation == 0 || frame.InvocationID == "" || frame.Request == nil) {
+			t.Fatalf("semantic decoder accepted invalid frame")
 		}
 	})
 }

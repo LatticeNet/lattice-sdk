@@ -192,14 +192,8 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		var frame struct {
-			Protocol     int      `json:"protocol"`
-			Kind         string   `json:"kind"`
-			Generation   uint64   `json:"generation"`
-			InvocationID string   `json:"invocation_id"`
-			Request      *Request `json:"request"`
-		}
-		if err := strictDecodeFrame(scanner.Bytes(), &frame); err != nil || frame.Protocol != 2 || frame.Generation != generation || frame.Kind != "invoke" || frame.InvocationID == "" || frame.Request == nil {
+		frame, err := decodeInvokeV2(scanner.Bytes(), generation)
+		if err != nil {
 			return fmt.Errorf("invalid stdio-json-v2 frame")
 		}
 		if _, exists := usedInvocations[frame.InvocationID]; exists {
@@ -243,6 +237,26 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 		}
 	}
 	return scanner.Err()
+}
+
+func decodeInvokeV2(raw []byte, generation uint64) (struct {
+	Protocol     int      `json:"protocol"`
+	Kind         string   `json:"kind"`
+	Generation   uint64   `json:"generation"`
+	InvocationID string   `json:"invocation_id"`
+	Request      *Request `json:"request"`
+}, error) {
+	var frame struct {
+		Protocol     int      `json:"protocol"`
+		Kind         string   `json:"kind"`
+		Generation   uint64   `json:"generation"`
+		InvocationID string   `json:"invocation_id"`
+		Request      *Request `json:"request"`
+	}
+	if err := strictDecodeFrame(raw, &frame); err != nil || frame.Protocol != 2 || frame.Kind != "invoke" || frame.Generation == 0 || frame.Generation != generation || frame.InvocationID == "" || frame.Request == nil {
+		return frame, ErrV2Protocol
+	}
+	return frame, nil
 }
 
 // emitV2 serializes terminal frames through the same transport writer used by

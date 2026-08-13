@@ -255,18 +255,32 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 			return nil, fmt.Errorf("decode host_response: %w", err)
 		}
 		env.Protocol, env.Kind, env.Generation, env.InvocationID, env.HostCallID = strictEnv.Protocol, strictEnv.Kind, strictEnv.Generation, strictEnv.InvocationID, strictEnv.HostCallID
-		if strictEnv.HostResponse.ID == nil || strictEnv.HostResponse.OK == nil || (*strictEnv.HostResponse.OK && strictEnv.HostResponse.Result == nil) || (!*strictEnv.HostResponse.OK && (strictEnv.HostResponse.Error == nil || *strictEnv.HostResponse.Error == "" || strictEnv.HostResponse.Result != nil)) {
+		if len(strictEnv.HostResponse.ID) == 0 || bytes.Equal(strictEnv.HostResponse.ID, []byte("null")) || len(strictEnv.HostResponse.OK) == 0 || bytes.Equal(strictEnv.HostResponse.OK, []byte("null")) {
 			return nil, fmt.Errorf("decode host_response: missing required payload")
 		}
+		var id string
+		var ok bool
+		if json.Unmarshal(strictEnv.HostResponse.ID, &id) != nil || id == "" || json.Unmarshal(strictEnv.HostResponse.OK, &ok) != nil {
+			return nil, fmt.Errorf("decode host_response: invalid required payload")
+		}
+		if ok && (len(strictEnv.HostResponse.Result) == 0 || bytes.Equal(strictEnv.HostResponse.Result, []byte("null"))) {
+			return nil, fmt.Errorf("decode host_response: missing result")
+		}
+		if !ok && (len(strictEnv.HostResponse.Error) == 0 || bytes.Equal(strictEnv.HostResponse.Error, []byte("null"))) {
+			return nil, fmt.Errorf("decode host_response: invalid failure")
+		}
+		if !ok && len(strictEnv.HostResponse.Result) > 0 && !bytes.Equal(strictEnv.HostResponse.Result, []byte("null")) {
+			return nil, fmt.Errorf("decode host_response: failure result")
+		}
 		var result json.RawMessage
-		if strictEnv.HostResponse.Result != nil {
-			result = *strictEnv.HostResponse.Result
+		if len(strictEnv.HostResponse.Result) > 0 {
+			result = strictEnv.HostResponse.Result
 		}
-		errText := ""
-		if strictEnv.HostResponse.Error != nil {
-			errText = *strictEnv.HostResponse.Error
+		var errText string
+		if len(strictEnv.HostResponse.Error) > 0 {
+			_ = json.Unmarshal(strictEnv.HostResponse.Error, &errText)
 		}
-		env.HostResponse = hostResponse{ID: *strictEnv.HostResponse.ID, OK: *strictEnv.HostResponse.OK, Result: result, Error: errText}
+		env.HostResponse = hostResponse{ID: id, OK: ok, Result: result, Error: errText}
 	} else if err := json.Unmarshal(scanned.raw, &env); err != nil {
 		return nil, fmt.Errorf("decode host_response: %w", err)
 	}
@@ -402,10 +416,10 @@ type strictHostResponseEnvelope struct {
 	HostResponse strictHostResponsePayload `json:"host_response"`
 }
 type strictHostResponsePayload struct {
-	ID     *string          `json:"id"`
-	OK     *bool            `json:"ok"`
-	Result *json.RawMessage `json:"result"`
-	Error  *string          `json:"error"`
+	ID     json.RawMessage `json:"id"`
+	OK     json.RawMessage `json:"ok"`
+	Result json.RawMessage `json:"result"`
+	Error  json.RawMessage `json:"error"`
 }
 
 type hostResponse struct {

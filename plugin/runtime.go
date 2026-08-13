@@ -124,8 +124,24 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 		ctx = context.Background()
 	}
 	scanner := bufio.NewScanner(rt.In)
-	scanner.Buffer(make([]byte, 0, 64*1024), rt.MaxRequestBytes)
+	max := rt.MaxRequestBytes
+	if max <= 0 {
+		max = DefaultMaxRequestBytes
+	}
+	scanner.Buffer(make([]byte, 0, 64*1024), max)
+	ready := struct {
+		Protocol     int    `json:"protocol"`
+		Kind         string `json:"kind"`
+		Generation   uint64 `json:"generation"`
+		InvocationID string `json:"invocation_id"`
+	}{2, "runtime_ready", generation, "runtime"}
+	if err := json.NewEncoder(rt.Out).Encode(ready); err != nil {
+		return err
+	}
 	for scanner.Scan() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		var frame struct {
 			Protocol     int     `json:"protocol"`
 			Kind         string  `json:"kind"`
@@ -145,6 +161,11 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 			Response     Response `json:"response"`
 		}{2, "invoke_result", generation, frame.InvocationID, resp}
 		if err := json.NewEncoder(rt.Out).Encode(out); err != nil {
+			return err
+		}
+		ready.InvocationID = frame.InvocationID
+		ready.Kind = "invoke_ready"
+		if err := json.NewEncoder(rt.Out).Encode(ready); err != nil {
 			return err
 		}
 	}

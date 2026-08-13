@@ -37,9 +37,14 @@ type HostClient struct {
 	responses        *bufio.Scanner
 	maxResponseBytes int
 
-	mu     sync.Mutex
-	nextID int
+	mu           sync.Mutex
+	nextID       int
+	generation   uint64
+	invocationID string
+	expired      bool
 }
+
+var ErrHostClientExpired = errors.New("invocation host client expired")
 
 type HostClientOptions struct {
 	Output           io.Writer
@@ -62,6 +67,22 @@ func NewHostClient(opts HostClientOptions) *HostClient {
 		client.responses = scanner
 	}
 	return client
+}
+
+// NewInvocationHostClient creates a lease-scoped facade. Expire it before the
+// worker emits invoke_ready so late plugin calls cannot reach the host.
+func NewInvocationHostClient(opts HostClientOptions, generation uint64, invocationID string) *HostClient {
+	c := NewHostClient(opts)
+	c.generation, c.invocationID = generation, invocationID
+	return c
+}
+
+func (c *HostClient) Expire() {
+	if c != nil {
+		c.mu.Lock()
+		c.expired = true
+		c.mu.Unlock()
+	}
 }
 
 func NewHostClientFromEnv(output io.Writer) (*HostClient, func()) {
@@ -98,11 +119,14 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.expired {
+		return nil, ErrHostClientExpired
+	}
 
 	c.nextID++
 	id := fmt.Sprintf("h%d", c.nextID)
 	if err := json.NewEncoder(c.output).Encode(hostCallEnvelope{
-		HostCall: hostCall{ID: id, Method: method, Params: params},
+		HostCall: hostCall{ID: id, HostCallID: id, Generation: c.generation, InvocationID: c.invocationID, Method: method, Params: params},
 	}); err != nil {
 		return nil, fmt.Errorf("write host_call: %w", err)
 	}
@@ -122,6 +146,9 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 	if env.HostResponse.ID != id {
 		return nil, fmt.Errorf("host_response id mismatch: got %q want %q", env.HostResponse.ID, id)
 	}
+	if env.HostResponse.HostCallID != "" && env.HostResponse.HostCallID != id {
+		return nil, fmt.Errorf("host_response host_call_id mismatch: got %q want %q", env.HostResponse.HostCallID, id)
+	}
 	if !env.HostResponse.OK {
 		message := env.HostResponse.Error
 		if message == "" {
@@ -137,9 +164,12 @@ type hostCallEnvelope struct {
 }
 
 type hostCall struct {
-	ID     string `json:"id"`
-	Method string `json:"method"`
-	Params any    `json:"params,omitempty"`
+	ID           string `json:"id"`
+	HostCallID   string `json:"host_call_id,omitempty"`
+	Generation   uint64 `json:"generation,omitempty"`
+	InvocationID string `json:"invocation_id,omitempty"`
+	Method       string `json:"method"`
+	Params       any    `json:"params,omitempty"`
 }
 
 type hostResponseEnvelope struct {
@@ -147,10 +177,11 @@ type hostResponseEnvelope struct {
 }
 
 type hostResponse struct {
-	ID     string          `json:"id"`
-	OK     bool            `json:"ok"`
-	Result json.RawMessage `json:"result,omitempty"`
-	Error  string          `json:"error,omitempty"`
+	ID         string          `json:"id"`
+	HostCallID string          `json:"host_call_id,omitempty"`
+	OK         bool            `json:"ok"`
+	Result     json.RawMessage `json:"result,omitempty"`
+	Error      string          `json:"error,omitempty"`
 }
 
 type HTTPRequest struct {

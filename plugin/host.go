@@ -54,6 +54,7 @@ type hostTransport struct {
 	writeMu   sync.Mutex
 	readMu    sync.Mutex
 	nextID    uint64
+	closer    io.Closer
 }
 
 var ErrHostClientExpired = errors.New("invocation host client expired")
@@ -78,7 +79,11 @@ func NewHostClient(opts HostClientOptions) *HostClient {
 		scanner.Buffer(make([]byte, 0, 64*1024), maxResponseBytes)
 		client.responses = scanner
 	}
-	client.transport = &hostTransport{output: client.output, responses: client.responses}
+	var closer io.Closer
+	if c, ok := opts.Responses.(io.Closer); ok {
+		closer = c
+	}
+	client.transport = &hostTransport{output: client.output, responses: client.responses, closer: closer}
 	return client
 }
 
@@ -110,6 +115,9 @@ func (c *HostClient) Expire() {
 		c.leaseMu.Lock()
 		c.expired.Store(true)
 		c.leaseMu.Unlock()
+		if c.transport != nil && c.transport.closer != nil {
+			_ = c.transport.closer.Close()
+		}
 		c.pending.Wait()
 	}
 }
@@ -193,7 +201,10 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 			return nil, fmt.Errorf("decode host_response: %w", err)
 		}
 		env.Protocol, env.Kind, env.Generation, env.InvocationID, env.HostCallID = strictEnv.Protocol, strictEnv.Kind, strictEnv.Generation, strictEnv.InvocationID, strictEnv.HostCallID
-		env.HostResponse = hostResponse{ID: strictEnv.HostResponse.ID, OK: strictEnv.HostResponse.OK, Result: strictEnv.HostResponse.Result, Error: strictEnv.HostResponse.Error}
+		if strictEnv.HostResponse.OK == nil || strictEnv.HostResponse.Result == nil {
+			return nil, fmt.Errorf("decode host_response: missing required payload")
+		}
+		env.HostResponse = hostResponse{ID: strictEnv.HostResponse.ID, OK: *strictEnv.HostResponse.OK, Result: *strictEnv.HostResponse.Result, Error: strictEnv.HostResponse.Error}
 	} else if err := json.Unmarshal(t.responses.Bytes(), &env); err != nil {
 		return nil, fmt.Errorf("decode host_response: %w", err)
 	}
@@ -315,10 +326,10 @@ type strictHostResponseEnvelope struct {
 	HostResponse strictHostResponsePayload `json:"host_response"`
 }
 type strictHostResponsePayload struct {
-	ID     string          `json:"id"`
-	OK     bool            `json:"ok"`
-	Result json.RawMessage `json:"result"`
-	Error  string          `json:"error,omitempty"`
+	ID     string           `json:"id"`
+	OK     *bool            `json:"ok"`
+	Result *json.RawMessage `json:"result"`
+	Error  string           `json:"error,omitempty"`
 }
 
 type hostResponse struct {

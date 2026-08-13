@@ -329,6 +329,19 @@ func TestStrictHostResponseHostileMatrix(t *testing.T) {
 	}
 }
 
+func TestV1HostCallWireExact(t *testing.T) {
+	var out bytes.Buffer
+	h := NewHostClient(HostClientOptions{Output: &out, Responses: strings.NewReader(`{"host_response":{"id":"h1","ok":true,"result":{}}}
+`)})
+	if _, _, err := h.KVGet(context.Background(), "k"); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"host_call":{"id":"h1","method":"kv.get","params":{"key":"k"}}}` + "\n"
+	if out.String() != want {
+		t.Fatalf("v1 wire=%q want %q", out.String(), want)
+	}
+}
+
 func TestCancelledHostCallAbortsAndLateCallIsSilent(t *testing.T) {
 	out := &lockedTestWriter{call: make(chan struct{}, 1)}
 	pr, pw := io.Pipe()

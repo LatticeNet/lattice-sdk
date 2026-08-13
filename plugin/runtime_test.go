@@ -359,6 +359,13 @@ func TestStrictHostCallHostileActual(t *testing.T) {
 		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":null}}`,
 		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":3}}`,
 		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":"x","result":null}}`,
+		`{"protocol":null,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
+		`{"protocol":2,"kind":null,"generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
+		`{"protocol":2,"kind":"host_response","generation":null,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":null,"host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":null,"host_response":{"id":"h1","ok":true,"result":{}}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":null,"ok":true,"result":{}}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false}}`,
 		`{"protocol":1,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
 		`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
 		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}} trailing`,
@@ -798,15 +805,30 @@ func FuzzStrictV2Decoder(f *testing.F) {
 }
 
 func FuzzStrictHostResponseValidation(f *testing.F) {
-	f.Add([]byte(`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`))
-	f.Fuzz(func(t *testing.T, raw []byte) {
+	valid := []byte(`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`)
+	invalid := []byte(`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false}}`)
+	f.Add(valid, true)
+	f.Add(invalid, false)
+	f.Add([]byte(`{"protocol":null}`), false)
+	f.Fuzz(func(t *testing.T, raw []byte, wantOK bool) {
 		var out bytes.Buffer
 		h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: io.NopCloser(bytes.NewReader(append(raw, '\n')))}, 1, "i")
 		result, err := h.Call(context.Background(), "kv.get", map[string]any{"key": "k"})
+		_ = wantOK
 		if err == nil {
 			if len(result) == 0 || out.Len() == 0 {
 				t.Fatal("successful strict response lacked result or host_call")
 			}
 		}
 	})
+}
+
+func TestStrictHostResponseFuzzSeeds(t *testing.T) {
+	for _, raw := range []string{`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false}}`, `{"protocol":null}`} {
+		pr := io.NopCloser(strings.NewReader(raw + "\n"))
+		h := NewInvocationHostClient(HostClientOptions{Output: io.Discard, Responses: pr}, 1, "i")
+		if _, err := h.Call(context.Background(), "kv.get", map[string]any{"key": "k"}); err == nil {
+			t.Fatalf("hostile seed accepted: %s", raw)
+		}
+	}
 }

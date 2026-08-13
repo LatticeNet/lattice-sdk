@@ -42,8 +42,6 @@ type HostClient struct {
 
 	mu           sync.Mutex
 	leaseMu      sync.Mutex
-	writeMu      sync.Mutex
-	readMu       sync.Mutex
 	nextID       int
 	generation   uint64
 	invocationID string
@@ -160,10 +158,11 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 		c.leaseMu.Unlock()
 		return nil, ErrHostClientExpired
 	}
-	if err := json.NewEncoder(t.output).Encode(hostCallEnvelope{
-		Protocol: 2, Kind: "host_call", Generation: c.generation, InvocationID: c.invocationID,
-		HostCallID: id, HostCall: hostCall{ID: id, HostCallID: id, Generation: c.generation, InvocationID: c.invocationID, Method: method, Params: params},
-	}); err != nil {
+	var frame any = hostCallEnvelope{HostCall: hostCall{ID: id, Method: method, Params: params}}
+	if c.strict {
+		frame = hostCallEnvelope{Protocol: 2, Kind: "host_call", Generation: c.generation, InvocationID: c.invocationID, HostCallID: id, HostCall: hostCall{ID: id, HostCallID: id, Generation: c.generation, InvocationID: c.invocationID, Method: method, Params: params}}
+	}
+	if err := json.NewEncoder(t.output).Encode(frame); err != nil {
 		t.writeMu.Unlock()
 		c.leaseMu.Unlock()
 		return nil, fmt.Errorf("write host_call: %w", err)

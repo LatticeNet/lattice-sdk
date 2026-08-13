@@ -193,13 +193,13 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 			return err
 		}
 		var frame struct {
-			Protocol     int     `json:"protocol"`
-			Kind         string  `json:"kind"`
-			Generation   uint64  `json:"generation"`
-			InvocationID string  `json:"invocation_id"`
-			Request      Request `json:"request"`
+			Protocol     int      `json:"protocol"`
+			Kind         string   `json:"kind"`
+			Generation   uint64   `json:"generation"`
+			InvocationID string   `json:"invocation_id"`
+			Request      *Request `json:"request"`
 		}
-		if err := strictDecodeFrame(scanner.Bytes(), &frame); err != nil || frame.Protocol != 2 || frame.Generation != generation || frame.Kind != "invoke" || frame.InvocationID == "" {
+		if err := strictDecodeFrame(scanner.Bytes(), &frame); err != nil || frame.Protocol != 2 || frame.Generation != generation || frame.Kind != "invoke" || frame.InvocationID == "" || frame.Request == nil {
 			return fmt.Errorf("invalid stdio-json-v2 frame")
 		}
 		if _, exists := usedInvocations[frame.InvocationID]; exists {
@@ -216,7 +216,7 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 		if rt.Host != nil {
 			invHost = rt.Host.scoped(generation, frame.InvocationID)
 		}
-		resp := handler.HandlePluginRequest(ctx, frame.Request, invHost)
+		resp := handler.HandlePluginRequest(ctx, *frame.Request, invHost)
 		if invHost != nil {
 			invHost.Expire()
 		}

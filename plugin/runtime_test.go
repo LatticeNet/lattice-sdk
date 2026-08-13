@@ -305,3 +305,21 @@ func FuzzV2Session(f *testing.F) {
 		_ = s.Accept(kind, generation, invocation)
 	})
 }
+
+func FuzzStrictV2Decoder(f *testing.F) {
+	f.Add([]byte(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{}}`))
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		var frame struct {
+			Protocol     int      `json:"protocol"`
+			Kind         string   `json:"kind"`
+			Generation   uint64   `json:"generation"`
+			InvocationID string   `json:"invocation_id"`
+			Request      *Request `json:"request"`
+		}
+		if err := strictDecodeFrame(raw, &frame); err == nil {
+			// Structural decoding is separate from lifecycle validation; invalid
+			// zero values are rejected by ServeV2 after this step.
+			_ = frame
+		}
+	})
+}

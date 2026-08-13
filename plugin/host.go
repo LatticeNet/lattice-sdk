@@ -42,6 +42,7 @@ type HostClient struct {
 
 	mu           sync.Mutex
 	leaseMu      sync.Mutex
+	pending      sync.WaitGroup
 	nextID       int
 	generation   uint64
 	invocationID string
@@ -104,6 +105,7 @@ func (c *HostClient) Expire() {
 		c.leaseMu.Lock()
 		c.expired.Store(true)
 		c.leaseMu.Unlock()
+		c.pending.Wait()
 	}
 }
 
@@ -144,6 +146,8 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 		c.leaseMu.Unlock()
 		return nil, ErrHostClientExpired
 	}
+	c.pending.Add(1)
+	defer c.pending.Done()
 
 	t := c.transport
 	if t == nil {

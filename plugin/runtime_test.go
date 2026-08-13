@@ -303,6 +303,17 @@ func TestStrictHostResponseRejectsWrongOuterCorrelation(t *testing.T) {
 	}
 }
 
+func TestStrictHostRejectsNonClosableReaderWithoutOutput(t *testing.T) {
+	var out bytes.Buffer
+	h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: strings.NewReader(`{}`)}, 1, "i")
+	if _, _, err := h.KVGet(context.Background(), "k"); err == nil {
+		t.Fatal("nonclosable strict host accepted")
+	}
+	if out.Len() != 0 {
+		t.Fatal("nonclosable strict host emitted bytes")
+	}
+}
+
 func TestCancelledHostCallAbortsAndLateCallIsSilent(t *testing.T) {
 	out := &lockedTestWriter{call: make(chan struct{}, 1)}
 	pr, pw := io.Pipe()

@@ -367,6 +367,23 @@ func TestCancelledHostCallAbortsAndLateCallIsSilent(t *testing.T) {
 	_ = pw.Close()
 }
 
+func TestCancelAfterHostWritePoisonsAndPreventsReuse(t *testing.T) {
+	pr, _ := io.Pipe()
+	ctx, cancel := context.WithCancel(context.Background())
+	out := &cancelAfterWriteWriter{cancel: cancel}
+	h := NewInvocationHostClient(HostClientOptions{Output: out, Responses: pr}, 1, "i")
+	if _, _, err := h.KVGet(ctx, "k"); err == nil {
+		t.Fatal("cancelled call succeeded")
+	}
+	before := out.Len()
+	if _, _, err := h.KVGet(context.Background(), "late"); err == nil {
+		t.Fatal("poisoned transport reused")
+	}
+	if out.Len() != before {
+		t.Fatal("late call emitted")
+	}
+}
+
 func TestCanonicalV2GoldenFrames(t *testing.T) {
 	b, err := os.ReadFile("testdata/stdio-json-v2-runtime-ready.jsonl")
 	if err != nil {
@@ -447,6 +464,22 @@ type lockedTestWriter struct {
 	call chan struct{}
 	once sync.Once
 }
+
+type cancelAfterWriteWriter struct {
+	mu     sync.Mutex
+	b      bytes.Buffer
+	cancel context.CancelFunc
+	once   sync.Once
+}
+
+func (w *cancelAfterWriteWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	n, _ := w.b.Write(p)
+	w.mu.Unlock()
+	w.once.Do(w.cancel)
+	return n, nil
+}
+func (w *cancelAfterWriteWriter) Len() int { w.mu.Lock(); defer w.mu.Unlock(); return w.b.Len() }
 
 func (w *lockedTestWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()

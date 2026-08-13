@@ -39,6 +39,9 @@ type HostClient struct {
 	maxResponseBytes int
 
 	mu           sync.Mutex
+	leaseMu      sync.Mutex
+	writeMu      sync.Mutex
+	readMu       sync.Mutex
 	nextID       int
 	generation   uint64
 	invocationID string
@@ -82,7 +85,9 @@ func NewInvocationHostClient(opts HostClientOptions, generation uint64, invocati
 
 func (c *HostClient) Expire() {
 	if c != nil {
+		c.leaseMu.Lock()
 		c.expired.Store(true)
+		c.leaseMu.Unlock()
 	}
 }
 
@@ -118,22 +123,34 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 		return nil, err
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.leaseMu.Lock()
 	if c.expired.Load() {
+		c.leaseMu.Unlock()
 		return nil, ErrHostClientExpired
 	}
 
 	c.nextID++
 	id := fmt.Sprintf("h%d", c.nextID)
+	c.writeMu.Lock()
+	if c.expired.Load() {
+		c.writeMu.Unlock()
+		c.leaseMu.Unlock()
+		return nil, ErrHostClientExpired
+	}
 	if err := json.NewEncoder(c.output).Encode(hostCallEnvelope{
 		HostCall: hostCall{ID: id, HostCallID: id, Generation: c.generation, InvocationID: c.invocationID, Method: method, Params: params},
 	}); err != nil {
+		c.writeMu.Unlock()
+		c.leaseMu.Unlock()
 		return nil, fmt.Errorf("write host_call: %w", err)
 	}
+	c.writeMu.Unlock()
+	c.leaseMu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	c.readMu.Lock()
+	defer c.readMu.Unlock()
 	if !c.responses.Scan() {
 		if err := c.responses.Err(); err != nil {
 			return nil, fmt.Errorf("read host_response: %w", err)

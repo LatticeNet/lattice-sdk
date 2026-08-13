@@ -249,6 +249,15 @@ func decodeInvokeV2(raw []byte, generation uint64) (struct {
 	InvocationID string   `json:"invocation_id"`
 	Request      *Request `json:"request"`
 }, error) {
+	if len(raw) > DefaultMaxRequestBytes {
+		return struct {
+			Protocol     int      `json:"protocol"`
+			Kind         string   `json:"kind"`
+			Generation   uint64   `json:"generation"`
+			InvocationID string   `json:"invocation_id"`
+			Request      *Request `json:"request"`
+		}{}, ErrV2Protocol
+	}
 	var frame struct {
 		Protocol     int      `json:"protocol"`
 		Kind         string   `json:"kind"`

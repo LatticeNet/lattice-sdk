@@ -327,6 +327,7 @@ func TestDecodeInvokeV2HostileMatrix(t *testing.T) {
 		{"trailing", base + ` {}`},
 		{"wrong_generation", `{"protocol":2,"kind":"invoke","generation":2,"invocation_id":"i","request":{}}`},
 		{"duplicate", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","invocation_id":"j","request":{}}`},
+		{"oversize", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{"blob":"` + strings.Repeat("x", DefaultMaxRequestBytes) + `"}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := decodeInvokeV2([]byte(tc.raw), 1); err == nil {

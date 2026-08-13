@@ -445,6 +445,7 @@ type lockedTestWriter struct {
 	mu   sync.Mutex
 	b    bytes.Buffer
 	call chan struct{}
+	once sync.Once
 }
 
 func (w *lockedTestWriter) Write(p []byte) (int, error) {
@@ -452,10 +453,7 @@ func (w *lockedTestWriter) Write(p []byte) (int, error) {
 	defer w.mu.Unlock()
 	n, _ := w.b.Write(p)
 	if bytes.Contains(p, []byte(`"kind":"host_call"`)) {
-		select {
-		case w.call <- struct{}{}:
-		default:
-		}
+		w.once.Do(func() { close(w.call) })
 	}
 	return n, nil
 }
@@ -500,7 +498,6 @@ func TestServeV2HostCallResponsePrecedesReady(t *testing.T) {
 	}
 }
 
-/*
 func TestServeV2SpawnedCallBlocksReadyAndRevokesFacade(t *testing.T) {
 	input := strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"a","request":{}}
 `)
@@ -514,6 +511,7 @@ func TestServeV2SpawnedCallBlocksReadyAndRevokesFacade(t *testing.T) {
 		done <- rt.ServeV2(context.Background(), HandlerFunc(func(ctx context.Context, _ Request, h *HostClient) Response {
 			captured = h
 			go func() { _, _, _ = h.KVGet(ctx, "k") }()
+			<-out.call
 			return Response{OK: true}
 		}), 1)
 	}()
@@ -538,7 +536,6 @@ func TestServeV2SpawnedCallBlocksReadyAndRevokesFacade(t *testing.T) {
 		t.Fatal("late facade emitted")
 	}
 }
-*/
 
 func FuzzV2Session(f *testing.F) {
 	f.Add("invoke", uint64(1), "i")

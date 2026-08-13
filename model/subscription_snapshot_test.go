@@ -23,6 +23,7 @@ func TestSubscriptionSnapshotRoundTrip(t *testing.T) {
 		SchemaVersion: SubscriptionSnapshotSchemaVersion,
 		PluginID:      "p", SubscriptionID: "s", Raw: "vless://example",
 		Userinfo: "upload=1; download=2; total=3", FetchedAt: at,
+		SourceVersion: "sv1:abc", SourceManifest: json.RawMessage(`{"schema":"manifest.v1"}`), Stale: true,
 	}
 	raw, err := json.Marshal(snap)
 	if err != nil {
@@ -34,5 +35,48 @@ func TestSubscriptionSnapshotRoundTrip(t *testing.T) {
 	}
 	if back.Raw != snap.Raw || back.Userinfo != snap.Userinfo || !back.FetchedAt.Equal(at) {
 		t.Fatalf("round trip lost data: %+v", back)
+	}
+	if back.SourceVersion != snap.SourceVersion || string(back.SourceManifest) != string(snap.SourceManifest) || !back.Stale {
+		t.Fatalf("round trip lost v2 provenance: %+v", back)
+	}
+}
+
+func TestSubscriptionSnapshotV1MigrationMarksFailedLastGoodStale(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		fetchError string
+		wantStale  bool
+	}{
+		{name: "successful", wantStale: false},
+		{name: "failed last good", fetchError: "upstream unavailable", wantStale: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := json.Marshal(map[string]any{
+				"schema_version": 1, "plugin_id": "p", "subscription_id": "s",
+				"raw": "vless://credential", "fetched_at": "2023-11-14T22:13:20Z",
+				"fetch_error": tc.fetchError,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got SubscriptionSnapshot
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.SchemaVersion != SubscriptionSnapshotSchemaVersion || got.Stale != tc.wantStale {
+				t.Fatalf("migrated snapshot = %+v", got)
+			}
+			if got.SourceVersion != "" || len(got.SourceManifest) != 0 {
+				t.Fatalf("v1 migration invented provenance: %+v", got)
+			}
+		})
+	}
+}
+
+func TestSubscriptionSnapshotRejectsUnknownSchema(t *testing.T) {
+	var got SubscriptionSnapshot
+	err := json.Unmarshal([]byte(`{"schema_version":3,"plugin_id":"p","subscription_id":"s"}`), &got)
+	if err == nil {
+		t.Fatal("unknown schema version accepted")
 	}
 }

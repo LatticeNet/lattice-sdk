@@ -113,6 +113,48 @@ type RuntimeOptions struct {
 	OpenHostFromEnv bool
 }
 
+// V2Session validates the ordered, single-invocation stdio-json-v2 lifecycle.
+// It is intentionally small and transport-agnostic so hosts can reject bad
+// frames before dispatching plugin code.
+type V2Session struct {
+	Generation uint64
+	state      string
+	invocation string
+}
+
+var ErrV2Protocol = fmt.Errorf("invalid stdio-json-v2 lifecycle")
+
+func NewV2Session(generation uint64) *V2Session {
+	return &V2Session{Generation: generation, state: "ready"}
+}
+func (s *V2Session) Accept(kind string, generation uint64, invocation string) error {
+	if s == nil || generation != s.Generation || invocation == "" {
+		return ErrV2Protocol
+	}
+	switch s.state {
+	case "ready":
+		if kind != "invoke" {
+			return ErrV2Protocol
+		}
+		s.invocation = invocation
+		s.state = "invoked"
+	case "invoked":
+		if kind != "invoke_result" || invocation != s.invocation {
+			return ErrV2Protocol
+		}
+		s.state = "result"
+	case "result":
+		if kind != "invoke_ready" || invocation != s.invocation {
+			return ErrV2Protocol
+		}
+		s.state = "ready"
+		s.invocation = ""
+	default:
+		return ErrV2Protocol
+	}
+	return nil
+}
+
 // ServeV2 processes correlated pooled-worker frames. It never accepts v1
 // request envelopes, allowing hosts to select v2 explicitly without a silent
 // downgrade.

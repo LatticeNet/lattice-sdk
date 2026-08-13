@@ -314,6 +314,21 @@ func TestStrictHostRejectsNonClosableReaderWithoutOutput(t *testing.T) {
 	}
 }
 
+func TestStrictHostResponseHostileMatrix(t *testing.T) {
+	base := `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`
+	for _, raw := range []string{
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_call_id":"h2","host_response":{"id":"h1","ok":true,"result":{}}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","extra":1,"host_response":{"id":"h1","ok":true,"result":{}}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true}}`,
+		base + ` {}`,
+	} {
+		var env strictHostResponseEnvelope
+		if err := strictDecodeFrame([]byte(raw), &env); err == nil && env.HostResponse.OK != nil && env.HostResponse.Result != nil {
+			t.Fatalf("hostile response accepted: %s", raw)
+		}
+	}
+}
+
 func TestCancelledHostCallAbortsAndLateCallIsSilent(t *testing.T) {
 	out := &lockedTestWriter{call: make(chan struct{}, 1)}
 	pr, pw := io.Pipe()

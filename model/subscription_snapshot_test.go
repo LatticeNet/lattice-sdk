@@ -1,7 +1,9 @@
 package model
 
 import (
+	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -18,12 +20,16 @@ func TestSnapshotKeyIsUnambiguous(t *testing.T) {
 }
 
 func TestSubscriptionSnapshotRoundTrip(t *testing.T) {
+	manifest, version, err := CanonicalSubscriptionSourceManifest(validSubscriptionSourceManifest())
+	if err != nil {
+		t.Fatal(err)
+	}
 	at := time.Unix(1700000000, 0).UTC()
 	snap := SubscriptionSnapshot{
 		SchemaVersion: SubscriptionSnapshotSchemaVersion,
 		PluginID:      "p", SubscriptionID: "s", Raw: "vless://example",
 		Userinfo: "upload=1; download=2; total=3", FetchedAt: at,
-		SourceVersion: "sv1:abc", SourceManifest: json.RawMessage(`{"schema":"manifest.v1"}`), Stale: true,
+		SourceVersion: version, SourceManifest: manifest, Stale: true,
 	}
 	raw, err := json.Marshal(snap)
 	if err != nil {
@@ -105,4 +111,61 @@ func TestSubscriptionSnapshotRejectsUnknownSchema(t *testing.T) {
 	if err == nil {
 		t.Fatal("unknown schema version accepted")
 	}
+}
+
+func TestSubscriptionSnapshotStrictDecoderRejectsInvalidVersionShapes(t *testing.T) {
+	manifest, version, err := CanonicalSubscriptionSourceManifest(validSubscriptionSourceManifest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	validV2, err := json.Marshal(SubscriptionSnapshot{
+		SchemaVersion: 2, PluginID: "p", SubscriptionID: "s", Raw: "raw",
+		SourceVersion: version, SourceManifest: manifest,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, raw := range map[string][]byte{
+		"duplicate":                 bytes.Replace(validV2, []byte(`"plugin_id":`), []byte(`"plugin_id":"duplicate","plugin_id":`), 1),
+		"unknown":                   bytes.Replace(validV2, []byte(`"plugin_id":`), []byte(`"unknown":true,"plugin_id":`), 1),
+		"trailing":                  append(append([]byte(nil), validV2...), []byte(` {}`)...),
+		"v1 with source version":    []byte(`{"schema_version":1,"plugin_id":"p","subscription_id":"s","raw":"raw","source_version":"sv1:abc","fetched_at":"0001-01-01T00:00:00Z"}`),
+		"v2 missing source version": bytes.Replace(validV2, []byte(`"source_version":"`+version+`",`), nil, 1),
+		"v2 missing manifest":       bytes.Replace(validV2, append([]byte(`"source_manifest":`), manifest...), []byte(`"source_manifest":null`), 1),
+		"v2 mismatched hash":        bytes.Replace(validV2, []byte(version), []byte("sv1:"+strings.Repeat("0", 64)), 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var got SubscriptionSnapshot
+			if err := json.Unmarshal(raw, &got); err == nil {
+				t.Fatal("invalid snapshot accepted")
+			}
+		})
+	}
+}
+
+func TestSubscriptionSnapshotRejectsRawAndResponseBounds(t *testing.T) {
+	manifest, version, err := CanonicalSubscriptionSourceManifest(validSubscriptionSourceManifest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, raw := range map[string][]byte{
+		"raw":      mustMarshalSnapshot(t, SubscriptionSnapshot{SchemaVersion: 2, PluginID: "p", SubscriptionID: "s", Raw: strings.Repeat("r", MaxSubscriptionRawBytes+1), SourceVersion: version, SourceManifest: manifest}),
+		"response": append([]byte(`{"schema_version":2,"plugin_id":"p","subscription_id":"s","raw":"`), bytes.Repeat([]byte{'r'}, MaxSubscriptionResponseBytes)...),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var got SubscriptionSnapshot
+			if err := json.Unmarshal(raw, &got); err == nil {
+				t.Fatal("oversized snapshot accepted")
+			}
+		})
+	}
+}
+
+func mustMarshalSnapshot(t *testing.T, snapshot SubscriptionSnapshot) []byte {
+	t.Helper()
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }

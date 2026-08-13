@@ -14,9 +14,13 @@ import (
 
 const (
 	SubscriptionSourceManifestSchemaV1 = "lattice.subscription-source-manifest.v1"
+	SubscriptionSourceRendererV1       = "vpn-core-graph-v1"
 	MaxSubscriptionSourceRoots         = 2_048
 	MaxSubscriptionSourceVisits        = 10_000
+	MaxSubscriptionURIBytes            = 4 << 10
 	MaxSubscriptionSourceManifestBytes = 1 << 20
+	MaxSubscriptionRawBytes            = 1 << 20
+	MaxSubscriptionResponseBytes       = 4 << 20
 )
 
 type SubscriptionSourceManifestV1 struct {
@@ -118,17 +122,17 @@ func DecodeSubscriptionSourceManifest(raw []byte) (SubscriptionSourceManifestV1,
 
 func (m SubscriptionSourceManifestV1) Clone() SubscriptionSourceManifestV1 {
 	out := m
-	out.EntryRoots = append([]string(nil), m.EntryRoots...)
-	out.Entries = append([]SubscriptionSourceManifestEntry(nil), m.Entries...)
+	out.EntryRoots = append(make([]string, 0, len(m.EntryRoots)), m.EntryRoots...)
+	out.Entries = append(make([]SubscriptionSourceManifestEntry, 0, len(m.Entries)), m.Entries...)
 	for i := range out.Entries {
-		out.Entries[i].Endpoint.ALPN = append([]string(nil), m.Entries[i].Endpoint.ALPN...)
-		out.Entries[i].Path = append([]SubscriptionSourceManifestEdge(nil), m.Entries[i].Path...)
+		out.Entries[i].Endpoint.ALPN = append(make([]string, 0, len(m.Entries[i].Endpoint.ALPN)), m.Entries[i].Endpoint.ALPN...)
+		out.Entries[i].Path = append(make([]SubscriptionSourceManifestEdge, 0, len(m.Entries[i].Path)), m.Entries[i].Path...)
 	}
 	return out
 }
 
 func (m SubscriptionSourceManifestV1) Validate() error {
-	if m.Schema != SubscriptionSourceManifestSchemaV1 || strings.TrimSpace(m.Renderer) == "" || strings.TrimSpace(m.Identity.ID) == "" || m.Identity.Generation == 0 {
+	if m.Schema != SubscriptionSourceManifestSchemaV1 || m.Renderer != SubscriptionSourceRendererV1 || strings.TrimSpace(m.Identity.ID) == "" || m.Identity.Generation == 0 {
 		return errors.New("invalid subscription source manifest header")
 	}
 	if m.EntryRoots == nil || m.Entries == nil || len(m.EntryRoots) == 0 || len(m.EntryRoots) > MaxSubscriptionSourceRoots || len(m.EntryRoots) != len(m.Entries) {
@@ -151,12 +155,21 @@ func (m SubscriptionSourceManifestV1) Validate() error {
 		if err := validateSubscriptionEndpoint(entry.Endpoint); err != nil {
 			return err
 		}
+		visits++
+		if visits > MaxSubscriptionSourceVisits {
+			return errors.New("subscription source manifest exceeds visited-line limit")
+		}
+		visited := map[string]struct{}{root: {}}
 		current := root
 		for _, edge := range entry.Path {
 			visits++
 			if visits > MaxSubscriptionSourceVisits || edge.Source != current || !subscriptionSourceUUIDv4.MatchString(edge.Target) || edge.Generation == 0 || edge.ObservationRevision == 0 || edge.Status != "converged" {
 				return errors.New("invalid subscription source path")
 			}
+			if _, exists := visited[edge.Target]; exists {
+				return errors.New("subscription source path contains a cycle")
+			}
+			visited[edge.Target] = struct{}{}
 			current = edge.Target
 		}
 		terminal := entry.Terminal
@@ -175,12 +188,12 @@ func validateSubscriptionEndpoint(endpoint SubscriptionSourceManifestEndpoint) e
 	for _, value := range values {
 		trimmed := strings.TrimSpace(value)
 		upper := strings.ToUpper(trimmed)
-		if trimmed == "" || strings.Contains(trimmed, "://") || strings.Contains(upper, "PRIVATE KEY") || strings.HasPrefix(trimmed, "lat$") {
+		if trimmed == "" || len(value) > MaxSubscriptionURIBytes || strings.Contains(trimmed, "://") || strings.Contains(upper, "PRIVATE KEY") || strings.HasPrefix(trimmed, "lat$") {
 			return errors.New("invalid or sensitive subscription source endpoint value")
 		}
 	}
 	for _, value := range endpoint.ALPN {
-		if strings.TrimSpace(value) == "" || strings.Contains(value, "://") {
+		if strings.TrimSpace(value) == "" || len(value) > MaxSubscriptionURIBytes || strings.Contains(value, "://") {
 			return errors.New("invalid subscription source ALPN")
 		}
 	}

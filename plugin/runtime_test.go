@@ -401,6 +401,19 @@ func TestCanonicalV2GoldenFrames(t *testing.T) {
 	}
 }
 
+func TestRuntimeGoldenHasExactLifecycleKinds(t *testing.T) {
+	var out bytes.Buffer
+	rt := &Runtime{In: strings.NewReader(`{"protocol":2,"kind":"invoke","generation":7,"invocation_id":"inv-1","request":{}}
+`), Out: &out}
+	if err := rt.ServeV2(context.Background(), HandlerFunc(func(context.Context, Request, *HostClient) Response { return Response{OK: true} }), 7); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 3 || !strings.Contains(lines[0], `"runtime_ready"`) || !strings.Contains(lines[1], `"invoke_result"`) || !strings.Contains(lines[2], `"invoke_ready"`) {
+		t.Fatalf("lifecycle=%q", out.String())
+	}
+}
+
 func TestDecodeInvokeV2HostileMatrix(t *testing.T) {
 	base := `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{}}`
 	for _, tc := range []struct{ name, raw string }{

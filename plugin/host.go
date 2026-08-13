@@ -93,6 +93,11 @@ func NewHostClient(opts HostClientOptions) *HostClient {
 // worker emits invoke_ready so late plugin calls cannot reach the host.
 func NewInvocationHostClient(opts HostClientOptions, generation uint64, invocationID string) *HostClient {
 	c := NewHostClient(opts)
+	if generation == 0 || strings.TrimSpace(invocationID) == "" {
+		c.output = nil
+		c.responses = nil
+		c.transport = nil
+	}
 	if _, ok := opts.Responses.(io.Closer); !ok {
 		c.output = nil
 		c.responses = nil

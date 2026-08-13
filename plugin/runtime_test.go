@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"strconv"
@@ -515,6 +516,51 @@ func TestServeV2NonclosableHostFailsFacadeClosed(t *testing.T) {
 		return Response{OK: true}
 	}), 1); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHostClientQueuedCancelDoesNotPoisonActiveExchange(t *testing.T) {
+	pr, pw := io.Pipe()
+	out := lockedTestWriter{call: make(chan struct{})}
+	h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: pr}, 1, "inv")
+	aDone := make(chan error, 1)
+	go func() { _, err := h.Call(context.Background(), "kv.get", map[string]any{"key": "a"}); aDone <- err }()
+	select {
+	case <-out.call:
+	case <-time.After(time.Second):
+		t.Fatal("first host_call not emitted")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	bDone := make(chan error, 1)
+	go func() { _, err := h.Call(ctx, "kv.get", map[string]any{"key": "b"}); bDone <- err }()
+	cancel()
+	if err := <-bDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("queued call error=%v", err)
+	}
+	before := out.Len()
+	_, _ = io.WriteString(pw, `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"inv","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{"value":"a"}}}`+"\n")
+	if err := <-aDone; err != nil {
+		t.Fatalf("active call failed after queued cancel: %v", err)
+	}
+	h.Expire()
+	if _, err := h.Call(context.Background(), "kv.get", map[string]any{"key": "late"}); !errors.Is(err, ErrHostClientExpired) {
+		t.Fatalf("late call error=%v", err)
+	}
+	if out.Len() != before {
+		t.Fatalf("late call emitted bytes: before=%d after=%d", before, out.Len())
+	}
+}
+
+func TestNewInvocationHostClientRejectsZeroCorrelation(t *testing.T) {
+	for _, tc := range []struct {
+		gen uint64
+		id  string
+	}{{0, "inv"}, {1, ""}} {
+		pr, _ := io.Pipe()
+		h := NewInvocationHostClient(HostClientOptions{Output: io.Discard, Responses: pr}, tc.gen, tc.id)
+		if h.Available() {
+			t.Fatalf("zero correlation accepted: gen=%d id=%q", tc.gen, tc.id)
+		}
 	}
 }
 

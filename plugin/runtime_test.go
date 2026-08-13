@@ -296,8 +296,8 @@ func TestStrictHostCallUsesOuterCorrelationOnly(t *testing.T) {
 }
 
 func TestStrictHostResponseRejectsWrongOuterCorrelation(t *testing.T) {
-	h := NewInvocationHostClient(HostClientOptions{Output: io.Discard, Responses: strings.NewReader(`{"protocol":2,"kind":"host_response","generation":2,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":null}}
-`)}, 1, "i")
+	h := NewInvocationHostClient(HostClientOptions{Output: io.Discard, Responses: io.NopCloser(strings.NewReader(`{"protocol":2,"kind":"host_response","generation":2,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}
+`))}, 1, "i")
 	if _, _, err := h.KVGet(context.Background(), "k"); err == nil {
 		t.Fatal("wrong outer generation accepted")
 	}
@@ -364,6 +364,10 @@ func TestDecodeInvokeV2HostileMatrix(t *testing.T) {
 		{"null", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":null}`},
 		{"trailing", base + ` {}`},
 		{"wrong_generation", `{"protocol":2,"kind":"invoke","generation":2,"invocation_id":"i","request":{}}`},
+		{"wrong_protocol", `{"protocol":1,"kind":"invoke","generation":1,"invocation_id":"i","request":{}}`},
+		{"wrong_kind", `{"protocol":2,"kind":"ready","generation":1,"invocation_id":"i","request":{}}`},
+		{"zero_generation", `{"protocol":2,"kind":"invoke","generation":0,"invocation_id":"i","request":{}}`},
+		{"nested_duplicate", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{"x":1,"x":2}}`},
 		{"duplicate", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","invocation_id":"j","request":{}}`},
 		{"oversize", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{"blob":"` + strings.Repeat("x", DefaultMaxRequestBytes) + `"}}`},
 	} {
@@ -481,7 +485,7 @@ func FuzzStrictV2Decoder(f *testing.F) {
 	f.Add([]byte(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{}}`))
 	f.Fuzz(func(t *testing.T, raw []byte) {
 		frame, err := decodeInvokeV2(raw, 1)
-		if err == nil && (frame.Protocol != 2 || frame.Kind != "invoke" || frame.Generation == 0 || frame.InvocationID == "" || frame.Request == nil) {
+		if err == nil && (frame.Protocol != 2 || frame.Kind != "invoke" || frame.Generation != 1 || frame.InvocationID == "" || frame.Request == nil) {
 			t.Fatalf("semantic decoder accepted invalid frame")
 		}
 	})

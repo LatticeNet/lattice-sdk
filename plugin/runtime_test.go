@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -398,15 +399,36 @@ func TestServeV2TwoInvocationsReuseRuntimeTransport(t *testing.T) {
 	_ = pw.Close()
 }
 
+type lockedTestWriter struct {
+	mu   sync.Mutex
+	b    bytes.Buffer
+	call chan struct{}
+}
+
+func (w *lockedTestWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n, _ := w.b.Write(p)
+	if bytes.Contains(p, []byte(`"kind":"host_call"`)) {
+		select {
+		case w.call <- struct{}{}:
+		default:
+		}
+	}
+	return n, nil
+}
+func (w *lockedTestWriter) Snapshot() string { w.mu.Lock(); defer w.mu.Unlock(); return w.b.String() }
+func (w *lockedTestWriter) Len() int         { w.mu.Lock(); defer w.mu.Unlock(); return w.b.Len() }
+
 func TestServeV2HostCallResponsePrecedesReady(t *testing.T) {
 	input := strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"a","request":{}}
 `)
-	var out bytes.Buffer
+	out := &lockedTestWriter{call: make(chan struct{}, 1)}
 	pr, pw := io.Pipe()
-	host := NewHostClient(HostClientOptions{Output: &out, Responses: pr})
+	host := NewHostClient(HostClientOptions{Output: out, Responses: pr})
 	started := make(chan struct{})
 	done := make(chan error, 1)
-	rt := &Runtime{In: input, Out: &out, Host: host}
+	rt := &Runtime{In: input, Out: out, Host: host}
 	go func() {
 		done <- rt.ServeV2(context.Background(), HandlerFunc(func(ctx context.Context, _ Request, h *HostClient) Response {
 			close(started)
@@ -415,6 +437,10 @@ func TestServeV2HostCallResponsePrecedesReady(t *testing.T) {
 		}), 1)
 	}()
 	<-started
+	<-out.call
+	if snap := out.Snapshot(); strings.Contains(snap, `"kind":"invoke_result"`) || strings.Contains(snap, `"kind":"invoke_ready"`) {
+		t.Fatal("terminal frame emitted before response")
+	}
 	select {
 	case <-done:
 		t.Fatal("runtime completed before response")
@@ -426,7 +452,8 @@ func TestServeV2HostCallResponsePrecedesReady(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if strings.Index(out.String(), `"kind":"invoke_result"`) > strings.Index(out.String(), `"kind":"invoke_ready"`) {
+	snap := out.Snapshot()
+	if strings.Index(snap, `"kind":"invoke_result"`) > strings.Index(snap, `"kind":"invoke_ready"`) {
 		t.Fatal("ready preceded result")
 	}
 }

@@ -385,13 +385,16 @@ func TestServeV2TwoInvocationsReuseRuntimeTransport(t *testing.T) {
 {"protocol":2,"kind":"invoke","generation":1,"invocation_id":"b","request":{}}
 `)
 	var out bytes.Buffer
-	rt := &Runtime{In: input, Out: &out}
+	pr, pw := io.Pipe()
+	host := NewHostClient(HostClientOptions{Output: &out, Responses: pr})
+	rt := &Runtime{In: input, Out: &out, Host: host}
 	if err := rt.ServeV2(context.Background(), HandlerFunc(func(context.Context, Request, *HostClient) Response { return Response{OK: true} }), 1); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Count(out.String(), `"kind":"invoke_ready"`) != 2 {
 		t.Fatalf("ready count=%d", strings.Count(out.String(), `"kind":"invoke_ready"`))
 	}
+	_ = pw.Close()
 }
 
 func FuzzV2Session(f *testing.F) {

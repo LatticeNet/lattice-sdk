@@ -42,6 +42,7 @@ type HostClient struct {
 	generation   uint64
 	invocationID string
 	expired      bool
+	strict       bool
 }
 
 var ErrHostClientExpired = errors.New("invocation host client expired")
@@ -74,6 +75,7 @@ func NewHostClient(opts HostClientOptions) *HostClient {
 func NewInvocationHostClient(opts HostClientOptions, generation uint64, invocationID string) *HostClient {
 	c := NewHostClient(opts)
 	c.generation, c.invocationID = generation, invocationID
+	c.strict = true
 	return c
 }
 
@@ -149,6 +151,9 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 	if env.HostResponse.HostCallID != "" && env.HostResponse.HostCallID != id {
 		return nil, fmt.Errorf("host_response host_call_id mismatch: got %q want %q", env.HostResponse.HostCallID, id)
 	}
+	if c.strict && (env.HostResponse.HostCallID == "" || env.HostResponse.Generation != c.generation || env.HostResponse.InvocationID != c.invocationID) {
+		return nil, fmt.Errorf("host_response correlation mismatch")
+	}
 	if !env.HostResponse.OK {
 		message := env.HostResponse.Error
 		if message == "" {
@@ -177,11 +182,13 @@ type hostResponseEnvelope struct {
 }
 
 type hostResponse struct {
-	ID         string          `json:"id"`
-	HostCallID string          `json:"host_call_id,omitempty"`
-	OK         bool            `json:"ok"`
-	Result     json.RawMessage `json:"result,omitempty"`
-	Error      string          `json:"error,omitempty"`
+	ID           string          `json:"id"`
+	HostCallID   string          `json:"host_call_id,omitempty"`
+	Generation   uint64          `json:"generation,omitempty"`
+	InvocationID string          `json:"invocation_id,omitempty"`
+	OK           bool            `json:"ok"`
+	Result       json.RawMessage `json:"result,omitempty"`
+	Error        string          `json:"error,omitempty"`
 }
 
 type HTTPRequest struct {

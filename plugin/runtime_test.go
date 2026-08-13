@@ -473,17 +473,18 @@ func TestRuntimeGoldenHostKVExact(t *testing.T) {
 	host := NewHostClient(HostClientOptions{Output: &out, Responses: pr})
 	rt := &Runtime{In: strings.NewReader(lines[1] + "\n"), Out: &out, Host: host}
 	done := make(chan error, 1)
+	callErr := make(chan error, 1)
 	go func() {
 		done <- rt.ServeV2(context.Background(), HandlerFunc(func(ctx context.Context, _ Request, h *HostClient) Response {
 			_, err := h.Call(ctx, "kv.get", map[string]any{"key": "k"})
-			if err != nil {
-				t.Error(err)
-			}
+			callErr <- err
 			return Response{OK: true}
 		}), 7)
 	}()
-	response := strings.Replace(lines[3], `"result":"v"`, `"result":{"ok":true,"value":"v"}`, 1)
-	_, _ = io.WriteString(pw, response+"\n")
+	_, _ = io.WriteString(pw, lines[3]+"\n")
+	if err := <-callErr; err != nil {
+		t.Fatal(err)
+	}
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}

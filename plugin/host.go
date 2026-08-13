@@ -55,6 +55,7 @@ type hostTransport struct {
 	responses *bufio.Scanner
 	writeMu   sync.Mutex
 	readMu    sync.Mutex
+	nextID    uint64
 }
 
 var ErrHostClientExpired = errors.New("invocation host client expired")
@@ -145,13 +146,13 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 		return nil, ErrHostClientExpired
 	}
 
-	c.nextID++
-	id := fmt.Sprintf("h%d", c.nextID)
 	t := c.transport
 	if t == nil {
 		t = &hostTransport{output: c.output, responses: c.responses}
 		c.transport = t
 	}
+	t.nextID++
+	id := fmt.Sprintf("h%d", t.nextID)
 	t.writeMu.Lock()
 	if c.expired.Load() {
 		t.writeMu.Unlock()
@@ -159,7 +160,8 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 		return nil, ErrHostClientExpired
 	}
 	if err := json.NewEncoder(t.output).Encode(hostCallEnvelope{
-		HostCall: hostCall{ID: id, HostCallID: id, Generation: c.generation, InvocationID: c.invocationID, Method: method, Params: params},
+		Protocol: 2, Kind: "host_call", Generation: c.generation, InvocationID: c.invocationID,
+		HostCallID: id, HostCall: hostCall{ID: id, HostCallID: id, Generation: c.generation, InvocationID: c.invocationID, Method: method, Params: params},
 	}); err != nil {
 		t.writeMu.Unlock()
 		c.leaseMu.Unlock()
@@ -179,7 +181,11 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 		return nil, errors.New("read host_response: eof")
 	}
 	var env hostResponseEnvelope
-	if err := json.Unmarshal(t.responses.Bytes(), &env); err != nil {
+	if c.strict {
+		if err := strictDecodeFrame(t.responses.Bytes(), &env); err != nil {
+			return nil, fmt.Errorf("decode host_response: %w", err)
+		}
+	} else if err := json.Unmarshal(t.responses.Bytes(), &env); err != nil {
 		return nil, fmt.Errorf("decode host_response: %w", err)
 	}
 	if env.HostResponse.ID != id {
@@ -188,7 +194,7 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 	if env.HostResponse.HostCallID != "" && env.HostResponse.HostCallID != id {
 		return nil, fmt.Errorf("host_response host_call_id mismatch: got %q want %q", env.HostResponse.HostCallID, id)
 	}
-	if c.strict && (env.HostResponse.HostCallID == "" || env.HostResponse.Generation != c.generation || env.HostResponse.InvocationID != c.invocationID) {
+	if c.strict && (env.Protocol != 2 || env.Kind != "host_response" || env.HostCallID != id || env.HostResponse.HostCallID == "" || env.HostResponse.Generation != c.generation || env.HostResponse.InvocationID != c.invocationID) {
 		return nil, fmt.Errorf("host_response correlation mismatch")
 	}
 	if !env.HostResponse.OK {
@@ -201,8 +207,26 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 	return append(json.RawMessage(nil), env.HostResponse.Result...), nil
 }
 
+func strictDecodeFrame(raw []byte, dst any) error {
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		return errors.New("trailing frame data")
+	}
+	return nil
+}
+
 type hostCallEnvelope struct {
-	HostCall hostCall `json:"host_call"`
+	Protocol     uint64   `json:"protocol,omitempty"`
+	Kind         string   `json:"kind,omitempty"`
+	Generation   uint64   `json:"generation,omitempty"`
+	InvocationID string   `json:"invocation_id,omitempty"`
+	HostCallID   string   `json:"host_call_id,omitempty"`
+	HostCall     hostCall `json:"host_call"`
 }
 
 type hostCall struct {
@@ -215,6 +239,11 @@ type hostCall struct {
 }
 
 type hostResponseEnvelope struct {
+	Protocol     uint64       `json:"protocol,omitempty"`
+	Kind         string       `json:"kind,omitempty"`
+	Generation   uint64       `json:"generation,omitempty"`
+	InvocationID string       `json:"invocation_id,omitempty"`
+	HostCallID   string       `json:"host_call_id,omitempty"`
 	HostResponse hostResponse `json:"host_response"`
 }
 

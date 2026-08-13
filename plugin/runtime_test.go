@@ -251,3 +251,45 @@ func TestRuntimeProtocolStdioJSONV2StrictFrames(t *testing.T) {
 		}
 	}
 }
+
+func TestServeV2RejectsReusedInvocationWithoutDispatch(t *testing.T) {
+	input := strings.NewReader(`{"protocol":2,"kind":"invoke","generation":9,"invocation_id":"same","request":{"method":"x"}}
+{"protocol":2,"kind":"invoke","generation":9,"invocation_id":"same","request":{"method":"x"}}
+`)
+	var out bytes.Buffer
+	calls := 0
+	rt := &Runtime{In: input, Out: &out}
+	err := rt.ServeV2(context.Background(), HandlerFunc(func(context.Context, Request, *HostClient) Response {
+		calls++
+		return Response{OK: true}
+	}), 9)
+	if err == nil || !strings.Contains(err.Error(), "duplicate invocation_id") {
+		t.Fatalf("expected duplicate rejection, got %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("duplicate dispatched %d times", calls)
+	}
+}
+
+func TestServeV2AllowsNilHost(t *testing.T) {
+	var out bytes.Buffer
+	rt := &Runtime{In: strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{}}
+`), Out: &out}
+	if err := rt.ServeV2(context.Background(), HandlerFunc(func(_ context.Context, _ Request, host *HostClient) Response {
+		if host != nil {
+			t.Fatal("unexpected host")
+		}
+		return Response{OK: true}
+	}), 1); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func FuzzV2Session(f *testing.F) {
+	f.Add("invoke", uint64(1), "i")
+	f.Add("invoke_result", uint64(1), "i")
+	f.Fuzz(func(t *testing.T, kind string, generation uint64, invocation string) {
+		s := NewV2Session(1)
+		_ = s.Accept(kind, generation, invocation)
+	})
+}

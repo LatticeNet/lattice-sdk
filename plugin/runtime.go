@@ -178,7 +178,8 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 		InvocationID string `json:"invocation_id"`
 	}{2, "runtime_ready", generation, "runtime"}
 	session := NewV2Session(generation)
-	if err := json.NewEncoder(rt.Out).Encode(ready); err != nil {
+	usedInvocations := make(map[string]struct{})
+	if err := rt.emitV2(ready); err != nil {
 		return err
 	}
 	for scanner.Scan() {
@@ -192,15 +193,22 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 			InvocationID string  `json:"invocation_id"`
 			Request      Request `json:"request"`
 		}
-		if err := json.Unmarshal(scanner.Bytes(), &frame); err != nil || frame.Protocol != 2 || frame.Generation != generation || frame.Kind != "invoke" || frame.InvocationID == "" {
+		if err := strictDecodeFrame(scanner.Bytes(), &frame); err != nil || frame.Protocol != 2 || frame.Generation != generation || frame.Kind != "invoke" || frame.InvocationID == "" {
 			return fmt.Errorf("invalid stdio-json-v2 frame")
 		}
+		if _, exists := usedInvocations[frame.InvocationID]; exists {
+			return fmt.Errorf("duplicate invocation_id")
+		}
+		if len(usedInvocations) >= 256 {
+			return fmt.Errorf("invocation limit exceeded")
+		}
+		usedInvocations[frame.InvocationID] = struct{}{}
 		if err := session.Accept("invoke", frame.Generation, frame.InvocationID); err != nil {
 			return err
 		}
 		invHost := rt.Host
 		if rt.Host != nil {
-			invHost = &HostClient{output: rt.Host.output, responses: rt.Host.responses, maxResponseBytes: rt.Host.maxResponseBytes, generation: generation, invocationID: frame.InvocationID, strict: true}
+			invHost = rt.Host.scoped(generation, frame.InvocationID)
 		}
 		resp := handler.HandlePluginRequest(ctx, frame.Request, invHost)
 		if invHost != nil {
@@ -213,12 +221,12 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 			InvocationID string   `json:"invocation_id"`
 			Response     Response `json:"response"`
 		}{2, "invoke_result", generation, frame.InvocationID, resp}
-		if err := json.NewEncoder(rt.Out).Encode(out); err != nil {
+		if err := rt.emitV2(out); err != nil {
 			return err
 		}
 		ready.InvocationID = frame.InvocationID
 		ready.Kind = "invoke_ready"
-		if err := json.NewEncoder(rt.Out).Encode(ready); err != nil {
+		if err := rt.emitV2(ready); err != nil {
 			return err
 		}
 		if err := session.Accept("invoke_result", frame.Generation, frame.InvocationID); err != nil {
@@ -229,6 +237,19 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 		}
 	}
 	return scanner.Err()
+}
+
+// emitV2 serializes terminal frames through the same transport writer used by
+// host_call. This prevents terminal lifecycle frames from overtaking an
+// admitted call when host and runtime share an output stream.
+func (rt *Runtime) emitV2(v any) error {
+	if rt.Host != nil && rt.Host.transport != nil {
+		t := rt.Host.transport
+		t.writeMu.Lock()
+		defer t.writeMu.Unlock()
+		return json.NewEncoder(t.output).Encode(v)
+	}
+	return json.NewEncoder(rt.Out).Encode(v)
 }
 
 func NewRuntime(opts RuntimeOptions) *Runtime {

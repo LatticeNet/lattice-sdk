@@ -52,7 +52,6 @@ type hostTransport struct {
 	output    io.Writer
 	responses *bufio.Scanner
 	writeMu   sync.Mutex
-	readMu    sync.Mutex
 	exchange  chan struct{}
 	nextID    uint64
 	closer    io.Closer
@@ -200,7 +199,6 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 	select {
 	case <-t.exchange:
 	case <-ctx.Done():
-		c.Abort()
 		return nil, ctx.Err()
 	}
 	defer func() { t.exchange <- struct{}{} }()

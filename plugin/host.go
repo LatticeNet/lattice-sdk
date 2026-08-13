@@ -200,16 +200,37 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if !t.responses.Scan() {
-		if err := t.responses.Err(); err != nil {
-			return nil, fmt.Errorf("read host_response: %w", err)
+	type scanResult struct {
+		raw []byte
+		err error
+	}
+	results := make(chan scanResult, 1)
+	go func() {
+		if !t.responses.Scan() {
+			if err := t.responses.Err(); err != nil {
+				results <- scanResult{err: fmt.Errorf("read host_response: %w", err)}
+			} else {
+				results <- scanResult{err: errors.New("read host_response: eof")}
+			}
+			return
 		}
-		return nil, errors.New("read host_response: eof")
+		results <- scanResult{raw: append([]byte(nil), t.responses.Bytes()...)}
+	}()
+	var scanned scanResult
+	select {
+	case scanned = <-results:
+	case <-ctx.Done():
+		c.Abort()
+		<-results
+		return nil, ctx.Err()
+	}
+	if scanned.err != nil {
+		return nil, scanned.err
 	}
 	var env hostResponseEnvelope
 	if c.strict {
 		var strictEnv strictHostResponseEnvelope
-		if err := strictDecodeFrame(t.responses.Bytes(), &strictEnv); err != nil {
+		if err := strictDecodeFrame(scanned.raw, &strictEnv); err != nil {
 			return nil, fmt.Errorf("decode host_response: %w", err)
 		}
 		env.Protocol, env.Kind, env.Generation, env.InvocationID, env.HostCallID = strictEnv.Protocol, strictEnv.Kind, strictEnv.Generation, strictEnv.InvocationID, strictEnv.HostCallID
@@ -217,7 +238,7 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 			return nil, fmt.Errorf("decode host_response: missing required payload")
 		}
 		env.HostResponse = hostResponse{ID: strictEnv.HostResponse.ID, OK: *strictEnv.HostResponse.OK, Result: *strictEnv.HostResponse.Result, Error: strictEnv.HostResponse.Error}
-	} else if err := json.Unmarshal(t.responses.Bytes(), &env); err != nil {
+	} else if err := json.Unmarshal(scanned.raw, &env); err != nil {
 		return nil, fmt.Errorf("decode host_response: %w", err)
 	}
 	if env.HostResponse.ID != id {

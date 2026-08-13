@@ -139,3 +139,95 @@ func TestSubscriptionSourceManifestCountsVisitedLinesAndEnforcesValueBounds(t *t
 		t.Fatal("oversized renderer input accepted")
 	}
 }
+
+func TestSubscriptionSourceManifestRejectsUnsafeTextInEveryRendererField(t *testing.T) {
+	setters := map[string]func(*SubscriptionSourceManifestV1, string){
+		"identity id": func(m *SubscriptionSourceManifestV1, value string) { m.Identity.ID = value },
+		"node id":     func(m *SubscriptionSourceManifestV1, value string) { m.Entries[0].Endpoint.NodeID = value },
+		"label":       func(m *SubscriptionSourceManifestV1, value string) { m.Entries[0].Endpoint.Label = value },
+		"host":        func(m *SubscriptionSourceManifestV1, value string) { m.Entries[0].Endpoint.Host = value },
+		"sni":         func(m *SubscriptionSourceManifestV1, value string) { m.Entries[0].Endpoint.SNI = value },
+		"fingerprint": func(m *SubscriptionSourceManifestV1, value string) { m.Entries[0].Endpoint.Fingerprint = value },
+		"public key":  func(m *SubscriptionSourceManifestV1, value string) { m.Entries[0].Endpoint.PublicKey = value },
+		"short id":    func(m *SubscriptionSourceManifestV1, value string) { m.Entries[0].Endpoint.ShortID = value },
+		"flow":        func(m *SubscriptionSourceManifestV1, value string) { m.Entries[0].Endpoint.Flow = value },
+	}
+	hostile := map[string]string{
+		"leading whitespace":  " unsafe",
+		"trailing whitespace": "unsafe ",
+		"control":             "unsafe\nvalue",
+		"uri":                 "vless://credential",
+		"private key":         "-----begin private key-----",
+		"envelope":            "lat$credential",
+	}
+	for field, set := range setters {
+		for shape, value := range hostile {
+			t.Run(field+"/"+shape, func(t *testing.T) {
+				manifest := validSubscriptionSourceManifest()
+				set(&manifest, value)
+				if _, _, err := CanonicalSubscriptionSourceManifest(manifest); err == nil {
+					t.Fatal("unsafe renderer input accepted")
+				}
+			})
+		}
+	}
+	for shape, value := range hostile {
+		t.Run("alpn/"+shape, func(t *testing.T) {
+			manifest := validSubscriptionSourceManifest()
+			manifest.Entries[0].Endpoint.ALPN = []string{value}
+			if _, _, err := CanonicalSubscriptionSourceManifest(manifest); err == nil {
+				t.Fatal("unsafe ALPN accepted")
+			}
+		})
+	}
+}
+
+func TestSubscriptionSourceManifestEnforcesExactEndpointSemantics(t *testing.T) {
+	for name, mutate := range map[string]func(*SubscriptionSourceManifestV1){
+		"uppercase host":   func(m *SubscriptionSourceManifestV1) { m.Entries[0].Endpoint.Host = "Entry.example.com" },
+		"leading host dot": func(m *SubscriptionSourceManifestV1) { m.Entries[0].Endpoint.Host = ".entry.example.com" },
+		"trailing sni dot": func(m *SubscriptionSourceManifestV1) { m.Entries[0].Endpoint.SNI = "entry.example.com." },
+		"empty dns label":  func(m *SubscriptionSourceManifestV1) { m.Entries[0].Endpoint.Host = "entry..example.com" },
+		"long dns label": func(m *SubscriptionSourceManifestV1) {
+			m.Entries[0].Endpoint.Host = strings.Repeat("a", 64) + ".example"
+		},
+		"unsafe host delimiter": func(m *SubscriptionSourceManifestV1) { m.Entries[0].Endpoint.Host = "entry.example.com/path" },
+		"fingerprint":           func(m *SubscriptionSourceManifestV1) { m.Entries[0].Endpoint.Fingerprint = "firefox" },
+		"public key encoding":   func(m *SubscriptionSourceManifestV1) { m.Entries[0].Endpoint.PublicKey = strings.Repeat("A", 42) },
+		"short id uppercase":    func(m *SubscriptionSourceManifestV1) { m.Entries[0].Endpoint.ShortID = "ABCDEF" },
+		"short id odd":          func(m *SubscriptionSourceManifestV1) { m.Entries[0].Endpoint.ShortID = "abc" },
+		"short id too short":    func(m *SubscriptionSourceManifestV1) { m.Entries[0].Endpoint.ShortID = "" },
+		"flow":                  func(m *SubscriptionSourceManifestV1) { m.Entries[0].Endpoint.Flow = "" },
+		"alpn unsupported":      func(m *SubscriptionSourceManifestV1) { m.Entries[0].Endpoint.ALPN = []string{"h3"} },
+		"alpn duplicate":        func(m *SubscriptionSourceManifestV1) { m.Entries[0].Endpoint.ALPN = []string{"h2", "h2"} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			manifest := validSubscriptionSourceManifest()
+			mutate(&manifest)
+			if _, _, err := CanonicalSubscriptionSourceManifest(manifest); err == nil {
+				t.Fatal("invalid endpoint semantics accepted")
+			}
+		})
+	}
+}
+
+func TestSubscriptionSourceManifestAcceptsCanonicalDNSIPAndEmptyALPN(t *testing.T) {
+	for _, host := range []string{"entry.example.com", "192.0.2.10", "2001:db8::1"} {
+		t.Run(host, func(t *testing.T) {
+			manifest := validSubscriptionSourceManifest()
+			manifest.Entries[0].Endpoint.Host = host
+			manifest.Entries[0].Endpoint.SNI = host
+			manifest.Entries[0].Endpoint.ALPN = []string{}
+			raw, _, err := CanonicalSubscriptionSourceManifest(manifest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Contains(raw, []byte(`"alpn":[]`)) {
+				t.Fatalf("empty ALPN is not canonical: %s", raw)
+			}
+			if _, err := DecodeSubscriptionSourceManifest(raw); err != nil {
+				t.Fatalf("canonical endpoint did not round trip: %v", err)
+			}
+		})
+	}
+}

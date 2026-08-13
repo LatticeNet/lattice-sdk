@@ -3,13 +3,16 @@ package model
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 const (
@@ -132,8 +135,11 @@ func (m SubscriptionSourceManifestV1) Clone() SubscriptionSourceManifestV1 {
 }
 
 func (m SubscriptionSourceManifestV1) Validate() error {
-	if m.Schema != SubscriptionSourceManifestSchemaV1 || m.Renderer != SubscriptionSourceRendererV1 || strings.TrimSpace(m.Identity.ID) == "" || m.Identity.Generation == 0 {
+	if m.Schema != SubscriptionSourceManifestSchemaV1 || m.Renderer != SubscriptionSourceRendererV1 || m.Identity.Generation == 0 {
 		return errors.New("invalid subscription source manifest header")
+	}
+	if err := validateSubscriptionText("identity id", m.Identity.ID, true); err != nil {
+		return err
 	}
 	if m.EntryRoots == nil || m.Entries == nil || len(m.EntryRoots) == 0 || len(m.EntryRoots) > MaxSubscriptionSourceRoots || len(m.EntryRoots) != len(m.Entries) {
 		return errors.New("invalid subscription source manifest roots")
@@ -181,23 +187,82 @@ func (m SubscriptionSourceManifestV1) Validate() error {
 }
 
 func validateSubscriptionEndpoint(endpoint SubscriptionSourceManifestEndpoint) error {
-	values := []string{endpoint.NodeID, endpoint.Label, endpoint.Host, endpoint.SNI, endpoint.Fingerprint, endpoint.PublicKey, endpoint.ShortID, endpoint.Flow}
 	if endpoint.Port < 1 || endpoint.Port > 65535 {
 		return errors.New("invalid subscription source endpoint")
 	}
-	for _, value := range values {
-		trimmed := strings.TrimSpace(value)
-		upper := strings.ToUpper(trimmed)
-		if trimmed == "" || len(value) > MaxSubscriptionURIBytes || strings.Contains(trimmed, "://") || strings.Contains(upper, "PRIVATE KEY") || strings.HasPrefix(trimmed, "lat$") {
-			return errors.New("invalid or sensitive subscription source endpoint value")
+	for name, value := range map[string]string{
+		"node id": endpoint.NodeID, "label": endpoint.Label, "host": endpoint.Host, "sni": endpoint.SNI,
+		"fingerprint": endpoint.Fingerprint, "public key": endpoint.PublicKey, "short id": endpoint.ShortID, "flow": endpoint.Flow,
+	} {
+		if err := validateSubscriptionText(name, value, true); err != nil {
+			return err
 		}
 	}
+	if !validSubscriptionHost(endpoint.Host) || !validSubscriptionHost(endpoint.SNI) {
+		return errors.New("invalid subscription source host or sni")
+	}
+	if endpoint.Fingerprint != "chrome" {
+		return errors.New("unsupported subscription source fingerprint")
+	}
+	publicKey, err := base64.RawURLEncoding.DecodeString(endpoint.PublicKey)
+	if err != nil || len(publicKey) != 32 || base64.RawURLEncoding.EncodeToString(publicKey) != endpoint.PublicKey {
+		return errors.New("invalid subscription source public key")
+	}
+	if len(endpoint.ShortID) < 2 || len(endpoint.ShortID) > 16 || len(endpoint.ShortID)%2 != 0 || endpoint.ShortID != strings.ToLower(endpoint.ShortID) {
+		return errors.New("invalid subscription source short id")
+	}
+	if _, err := hex.DecodeString(endpoint.ShortID); err != nil {
+		return errors.New("invalid subscription source short id")
+	}
+	if endpoint.Flow != "xtls-rprx-vision" {
+		return errors.New("unsupported subscription source flow")
+	}
+	allowedALPN := map[string]struct{}{"h2": {}, "http/1.1": {}}
+	seenALPN := make(map[string]struct{}, len(endpoint.ALPN))
 	for _, value := range endpoint.ALPN {
-		if strings.TrimSpace(value) == "" || len(value) > MaxSubscriptionURIBytes || strings.Contains(value, "://") {
-			return errors.New("invalid subscription source ALPN")
+		if err := validateSubscriptionText("alpn", value, true); err != nil {
+			return err
 		}
+		if _, ok := allowedALPN[value]; !ok {
+			return errors.New("unsupported subscription source ALPN")
+		}
+		if _, exists := seenALPN[value]; exists {
+			return errors.New("duplicate subscription source ALPN")
+		}
+		seenALPN[value] = struct{}{}
 	}
 	return nil
+}
+
+func validateSubscriptionText(name, value string, required bool) error {
+	if (required && value == "") || value != strings.TrimSpace(value) || len(value) > MaxSubscriptionURIBytes || strings.ContainsFunc(value, unicode.IsControl) {
+		return fmt.Errorf("invalid subscription source %s", name)
+	}
+	upper := strings.ToUpper(value)
+	if strings.Contains(value, "://") || strings.Contains(upper, "PRIVATE KEY") || strings.HasPrefix(value, "lat$") {
+		return fmt.Errorf("sensitive subscription source %s", name)
+	}
+	return nil
+}
+
+func validSubscriptionHost(value string) bool {
+	if ip := net.ParseIP(value); ip != nil {
+		return ip.String() == value
+	}
+	if len(value) == 0 || len(value) > 253 || value != strings.ToLower(value) || strings.HasPrefix(value, ".") || strings.HasSuffix(value, ".") {
+		return false
+	}
+	for _, label := range strings.Split(value, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, r := range label {
+			if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func rejectDuplicateJSONFields(raw []byte) error {

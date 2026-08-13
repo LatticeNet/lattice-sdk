@@ -308,8 +308,9 @@ func TestCancelledHostCallAbortsAndLateCallIsSilent(t *testing.T) {
 	h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: pr}, 1, "i")
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { _, _, err := h.KVGet(ctx, "k"); done <- err }()
-	time.Sleep(10 * time.Millisecond)
+	started := make(chan struct{})
+	go func() { close(started); _, _, err := h.KVGet(ctx, "k"); done <- err }()
+	<-started
 	cancel()
 	select {
 	case <-done:
@@ -395,6 +396,39 @@ func TestServeV2TwoInvocationsReuseRuntimeTransport(t *testing.T) {
 		t.Fatalf("ready count=%d", strings.Count(out.String(), `"kind":"invoke_ready"`))
 	}
 	_ = pw.Close()
+}
+
+func TestServeV2HostCallResponsePrecedesReady(t *testing.T) {
+	input := strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"a","request":{}}
+`)
+	var out bytes.Buffer
+	pr, pw := io.Pipe()
+	host := NewHostClient(HostClientOptions{Output: &out, Responses: pr})
+	started := make(chan struct{})
+	done := make(chan error, 1)
+	rt := &Runtime{In: input, Out: &out, Host: host}
+	go func() {
+		done <- rt.ServeV2(context.Background(), HandlerFunc(func(ctx context.Context, _ Request, h *HostClient) Response {
+			close(started)
+			_, _, err := h.KVGet(ctx, "k")
+			return Response{OK: err == nil}
+		}), 1)
+	}()
+	<-started
+	select {
+	case <-done:
+		t.Fatal("runtime completed before response")
+	default:
+	}
+	if _, err := io.WriteString(pw, `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"a","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if strings.Index(out.String(), `"kind":"invoke_result"`) > strings.Index(out.String(), `"kind":"invoke_ready"`) {
+		t.Fatal("ready preceded result")
+	}
 }
 
 func FuzzV2Session(f *testing.F) {

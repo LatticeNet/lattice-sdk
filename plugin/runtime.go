@@ -113,6 +113,44 @@ type RuntimeOptions struct {
 	OpenHostFromEnv bool
 }
 
+// ServeV2 processes correlated pooled-worker frames. It never accepts v1
+// request envelopes, allowing hosts to select v2 explicitly without a silent
+// downgrade.
+func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint64) error {
+	if rt == nil || handler == nil {
+		return fmt.Errorf("plugin runtime or handler is nil")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	scanner := bufio.NewScanner(rt.In)
+	scanner.Buffer(make([]byte, 0, 64*1024), rt.MaxRequestBytes)
+	for scanner.Scan() {
+		var frame struct {
+			Protocol     int     `json:"protocol"`
+			Kind         string  `json:"kind"`
+			Generation   uint64  `json:"generation"`
+			InvocationID string  `json:"invocation_id"`
+			Request      Request `json:"request"`
+		}
+		if err := json.Unmarshal(scanner.Bytes(), &frame); err != nil || frame.Protocol != 2 || frame.Generation != generation || frame.Kind != "invoke" || frame.InvocationID == "" {
+			return fmt.Errorf("invalid stdio-json-v2 frame")
+		}
+		resp := handler.HandlePluginRequest(ctx, frame.Request, rt.Host)
+		out := struct {
+			Protocol     int      `json:"protocol"`
+			Kind         string   `json:"kind"`
+			Generation   uint64   `json:"generation"`
+			InvocationID string   `json:"invocation_id"`
+			Response     Response `json:"response"`
+		}{2, "invoke_result", generation, frame.InvocationID, resp}
+		if err := json.NewEncoder(rt.Out).Encode(out); err != nil {
+			return err
+		}
+	}
+	return scanner.Err()
+}
+
 func NewRuntime(opts RuntimeOptions) *Runtime {
 	in := opts.In
 	if in == nil {

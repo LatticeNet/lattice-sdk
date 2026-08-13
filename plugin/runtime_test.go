@@ -371,7 +371,7 @@ func TestStrictHostCallHostileActual(t *testing.T) {
 		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}} trailing`,
 		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{"x":"` + strings.Repeat("x", DefaultMaxHostResponseBytes) + `"}}}`,
 	}
-	names := []string{"duplicate_root", "unknown_root", "missing_nested_result", "wrong_generation", "missing_protocol", "missing_kind", "missing_generation", "missing_invocation", "missing_call_id", "wrong_call_id", "missing_nested_id", "null_nested_ok", "union_result_error", "unknown_nested", "duplicate_nested", "missing_host_response", "null_host_response", "missing_nested_ok", "wrong_invocation", "wrong_nested_id", "failure_result_present", "success_result_null", "success_error_null", "success_error_nonempty", "failure_error_empty", "failure_error_null", "failure_error_nonstring", "failure_result_null", "wrong_protocol", "wrong_kind", "trailing", "oversize"}
+	names := []string{"duplicate_root", "unknown_root", "missing_nested_result", "wrong_generation", "missing_protocol", "missing_kind", "missing_generation", "missing_invocation", "missing_call_id", "wrong_call_id", "missing_nested_id", "null_nested_ok", "union_result_error", "unknown_nested", "duplicate_nested", "missing_host_response", "null_host_response", "missing_nested_ok", "wrong_invocation", "wrong_nested_id", "failure_result_present", "success_result_null", "success_error_null", "success_error_nonempty", "failure_error_empty", "failure_error_null", "failure_error_nonstring", "failure_result_null", "wrong_protocol", "wrong_kind", "trailing", "oversize", "null_protocol", "null_kind", "null_generation", "null_invocation", "null_call_id", "null_nested_id", "missing_failure_error"}
 	for i, raw := range frames {
 		raw := raw
 		name := strconv.Itoa(i)
@@ -806,15 +806,11 @@ func FuzzStrictV2Decoder(f *testing.F) {
 
 func FuzzStrictHostResponseValidation(f *testing.F) {
 	valid := []byte(`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`)
-	invalid := []byte(`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false}}`)
-	f.Add(valid, true)
-	f.Add(invalid, false)
-	f.Add([]byte(`{"protocol":null}`), false)
-	f.Fuzz(func(t *testing.T, raw []byte, wantOK bool) {
+	f.Add(valid)
+	f.Fuzz(func(t *testing.T, raw []byte) {
 		var out bytes.Buffer
 		h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: io.NopCloser(bytes.NewReader(append(raw, '\n')))}, 1, "i")
 		result, err := h.Call(context.Background(), "kv.get", map[string]any{"key": "k"})
-		_ = wantOK
 		if err == nil {
 			if len(result) == 0 || out.Len() == 0 {
 				t.Fatal("successful strict response lacked result or host_call")

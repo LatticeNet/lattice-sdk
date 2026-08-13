@@ -272,7 +272,7 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 		if !ok && len(strictEnv.HostResponse.Result) > 0 {
 			return nil, fmt.Errorf("decode host_response: failure result")
 		}
-		if ok && len(strictEnv.HostResponse.Error) > 0 && !bytes.Equal(strictEnv.HostResponse.Error, []byte("null")) {
+		if ok && len(strictEnv.HostResponse.Error) > 0 {
 			return nil, fmt.Errorf("decode host_response: success error")
 		}
 		var result json.RawMessage

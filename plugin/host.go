@@ -55,6 +55,7 @@ type hostTransport struct {
 	readMu    sync.Mutex
 	nextID    uint64
 	closer    io.Closer
+	poisoned  atomic.Bool
 }
 
 var ErrHostClientExpired = errors.New("invocation host client expired")
@@ -128,6 +129,9 @@ func (c *HostClient) Abort() {
 	c.leaseMu.Lock()
 	c.expired.Store(true)
 	c.leaseMu.Unlock()
+	if c.transport != nil {
+		c.transport.poisoned.Store(true)
+	}
 	if c.transport != nil && c.transport.closer != nil {
 		_ = c.transport.closer.Close()
 	}
@@ -170,6 +174,10 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 		c.leaseMu.Unlock()
 		return nil, ErrHostClientExpired
 	}
+	if c.transport != nil && c.transport.poisoned.Load() {
+		c.leaseMu.Unlock()
+		return nil, ErrHostClientExpired
+	}
 	c.pending.Add(1)
 	c.leaseMu.Unlock()
 	defer c.pending.Done()
@@ -198,6 +206,7 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 	}
 	t.writeMu.Unlock()
 	if err := ctx.Err(); err != nil {
+		c.Abort()
 		return nil, err
 	}
 	type scanResult struct {

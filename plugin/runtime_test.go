@@ -304,14 +304,13 @@ func TestStrictHostResponseRejectsWrongOuterCorrelation(t *testing.T) {
 }
 
 func TestCancelledHostCallAbortsAndLateCallIsSilent(t *testing.T) {
-	var out bytes.Buffer
+	out := &lockedTestWriter{call: make(chan struct{}, 1)}
 	pr, pw := io.Pipe()
-	h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: pr}, 1, "i")
+	h := NewInvocationHostClient(HostClientOptions{Output: out, Responses: pr}, 1, "i")
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	started := make(chan struct{})
-	go func() { close(started); _, _, err := h.KVGet(ctx, "k"); done <- err }()
-	<-started
+	go func() { _, _, err := h.KVGet(ctx, "k"); done <- err }()
+	<-out.call
 	cancel()
 	select {
 	case <-done:

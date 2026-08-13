@@ -217,6 +217,9 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 		if invHost != nil {
 			invHost.Expire()
 		}
+		if serveTransport != nil && serveTransport.poisoned.Load() {
+			return fmt.Errorf("v2 transport aborted")
+		}
 		if err := session.Accept("invoke_result", frame.Generation, frame.InvocationID); err != nil {
 			return err
 		}

@@ -203,7 +203,7 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 	if env.HostResponse.HostCallID != "" && env.HostResponse.HostCallID != id {
 		return nil, fmt.Errorf("host_response host_call_id mismatch: got %q want %q", env.HostResponse.HostCallID, id)
 	}
-	if c.strict && (env.Protocol != 2 || env.Kind != "host_response" || env.HostCallID != id || env.Generation != c.generation || env.InvocationID != c.invocationID || env.HostResponse.HostCallID == "" || env.HostResponse.Generation != c.generation || env.HostResponse.InvocationID != c.invocationID) {
+	if c.strict && (env.Protocol != 2 || env.Kind != "host_response" || env.HostCallID != id || env.Generation != c.generation || env.InvocationID != c.invocationID) {
 		return nil, fmt.Errorf("host_response correlation mismatch")
 	}
 	if !env.HostResponse.OK {

@@ -505,8 +505,8 @@ func TestRuntimeGoldenHostKVExact(t *testing.T) {
 }
 
 func TestServeV2NonclosableHostFailsFacadeClosed(t *testing.T) {
-	h := NewHostClient(HostClientOptions{Output: io.Discard, Responses: strings.NewReader(`{}`)})
 	var out bytes.Buffer
+	h := NewHostClient(HostClientOptions{Output: &out, Responses: strings.NewReader(`{}`)})
 	rt := &Runtime{In: strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{}}
 `), Out: &out, Host: h}
 	if err := rt.ServeV2(context.Background(), HandlerFunc(func(ctx context.Context, _ Request, host *HostClient) Response {

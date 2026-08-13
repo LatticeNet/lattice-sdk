@@ -12,6 +12,27 @@ import (
 	"testing"
 )
 
+func TestV2SessionRejectsStaleDuplicateAndLate(t *testing.T) {
+	s := NewV2Session(7)
+	if err := s.Accept("invoke", 7, "i1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Accept("invoke", 7, "i1"); err == nil {
+		t.Fatal("duplicate invoke accepted")
+	}
+	s = NewV2Session(7)
+	if err := s.Accept("invoke", 6, "i1"); err == nil {
+		t.Fatal("stale generation accepted")
+	}
+	s = NewV2Session(7)
+	if err := s.Accept("invoke", 7, "i1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Accept("invoke_ready", 7, "i1"); err == nil {
+		t.Fatal("late ready accepted")
+	}
+}
+
 func TestRuntimeServeFramesRequestsAndResponses(t *testing.T) {
 	in := strings.NewReader(`{"action":"call","payload":{"service":"example/items","method":"list","payload":{"want":"nodes"}}}` + "\n")
 	var out bytes.Buffer

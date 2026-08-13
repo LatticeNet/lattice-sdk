@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 const (
@@ -41,7 +42,7 @@ type HostClient struct {
 	nextID       int
 	generation   uint64
 	invocationID string
-	expired      bool
+	expired      atomic.Bool
 	strict       bool
 }
 
@@ -81,9 +82,7 @@ func NewInvocationHostClient(opts HostClientOptions, generation uint64, invocati
 
 func (c *HostClient) Expire() {
 	if c != nil {
-		c.mu.Lock()
-		c.expired = true
-		c.mu.Unlock()
+		c.expired.Store(true)
 	}
 }
 
@@ -121,7 +120,7 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.expired {
+	if c.expired.Load() {
 		return nil, ErrHostClientExpired
 	}
 

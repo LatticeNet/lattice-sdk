@@ -203,7 +203,9 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 			invHost = &HostClient{output: rt.Host.output, responses: rt.Host.responses, maxResponseBytes: rt.Host.maxResponseBytes, generation: generation, invocationID: frame.InvocationID, strict: true}
 		}
 		resp := handler.HandlePluginRequest(ctx, frame.Request, invHost)
-		invHost.Expire()
+		if invHost != nil {
+			invHost.Expire()
+		}
 		out := struct {
 			Protocol     int      `json:"protocol"`
 			Kind         string   `json:"kind"`

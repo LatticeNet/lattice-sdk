@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -86,7 +87,7 @@ func (s *SubscriptionSnapshot) UnmarshalJSON(raw []byte) error {
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return err
 	}
-	if len(decoded.Raw) > MaxSubscriptionRawBytes {
+	if len(decoded.Raw) > MaxSubscriptionRawBytes && !strings.HasPrefix(decoded.Raw, "lat$") {
 		return fmt.Errorf("subscription snapshot raw content exceeds byte limit")
 	}
 	persistedVersion := decoded.SchemaVersion

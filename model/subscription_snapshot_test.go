@@ -172,6 +172,17 @@ func TestSubscriptionSnapshotRejectsRawAndResponseBounds(t *testing.T) {
 	}
 }
 
+func TestSubscriptionSnapshotAllowsPersistedEnvelopeExpansionForStoreValidation(t *testing.T) {
+	raw := mustMarshalSnapshot(t, SubscriptionSnapshot{
+		SchemaVersion: 2, PluginID: "p", SubscriptionID: "s",
+		Raw: "lat$" + strings.Repeat("A", MaxSubscriptionRawBytes),
+	})
+	var got SubscriptionSnapshot
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("persisted envelope expansion rejected before store decryption: %v", err)
+	}
+}
+
 func mustMarshalSnapshot(t *testing.T, snapshot SubscriptionSnapshot) []byte {
 	t.Helper()
 	raw, err := json.Marshal(snapshot)

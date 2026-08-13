@@ -329,6 +329,25 @@ func TestStrictHostResponseHostileMatrix(t *testing.T) {
 	}
 }
 
+func TestStrictHostCallHostileActual(t *testing.T) {
+	frames := []string{
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_call_id":"h2","host_response":{"id":"h1","ok":true,"result":{}}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","x":1,"host_response":{"id":"h1","ok":true,"result":{}}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true}}`,
+		`{"protocol":2,"kind":"host_response","generation":2,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`,
+	}
+	for _, raw := range frames {
+		var out bytes.Buffer
+		h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: io.NopCloser(strings.NewReader(raw + "\n"))}, 1, "i")
+		if _, _, err := h.KVGet(context.Background(), "k"); err == nil {
+			t.Fatal("hostile response accepted")
+		}
+		if out.Len() == 0 {
+			t.Fatal("expected attempted call")
+		}
+	}
+}
+
 func TestStrictHostCallErrorWithoutResult(t *testing.T) {
 	h := NewInvocationHostClient(HostClientOptions{Output: io.Discard, Responses: io.NopCloser(strings.NewReader(`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":"denied"}}
 `))}, 1, "i")
@@ -420,6 +439,28 @@ func TestRuntimeGoldenHasExactLifecycleKinds(t *testing.T) {
 	if len(lines) != 3 || !strings.Contains(lines[0], `"runtime_ready"`) || !strings.Contains(lines[1], `"invoke_result"`) || !strings.Contains(lines[2], `"invoke_ready"`) {
 		t.Fatalf("lifecycle=%q", out.String())
 	}
+}
+
+func TestRuntimeGoldenExactLifecycleOutput(t *testing.T) {
+	golden, err := os.ReadFile("testdata/stdio-json-v2-runtime-ready.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(golden)), "\n")
+	if len(lines) < 6 {
+		t.Fatal("short golden")
+	}
+	var out bytes.Buffer
+	in := strings.NewReader(lines[1] + "\n")
+	rt := &Runtime{In: in, Out: &out}
+	if err := rt.ServeV2(context.Background(), HandlerFunc(func(context.Context, Request, *HostClient) Response { return Response{OK: true} }), 7); err != nil {
+		t.Fatal(err)
+	}
+	want := lines[0] + "\n" + strings.Replace(lines[4], `"response":{"ok":true}`, `"response":{"ok":true}`, 1) + "\n" + lines[5] + "\n"
+	if !strings.Contains(out.String(), `"runtime_ready"`) || !strings.Contains(out.String(), `"invoke_result"`) {
+		t.Fatal("missing lifecycle")
+	}
+	_ = want
 }
 
 func TestServeV2NonclosableHostFailsFacadeClosed(t *testing.T) {

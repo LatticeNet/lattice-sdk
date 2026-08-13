@@ -488,7 +488,7 @@ func TestRuntimeGoldenHostKVExact(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Split(strings.TrimSpace(out.String()), "\n")
-	if len(got) < 3 || !strings.Contains(got[0], `runtime_ready`) || !strings.Contains(got[1], `host_call`) || !strings.Contains(got[2], `invoke_result`) {
+	if len(got) != 4 || got[0]+"\n"+got[1]+"\n"+got[2]+"\n"+got[3]+"\n" != lines[0]+"\n"+lines[2]+"\n"+lines[4]+"\n"+lines[5]+"\n" {
 		t.Fatalf("unexpected output %q", out.String())
 	}
 }

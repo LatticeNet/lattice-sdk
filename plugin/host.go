@@ -115,10 +115,21 @@ func (c *HostClient) Expire() {
 		c.leaseMu.Lock()
 		c.expired.Store(true)
 		c.leaseMu.Unlock()
-		if c.transport != nil && c.transport.closer != nil {
-			_ = c.transport.closer.Close()
-		}
 		c.pending.Wait()
+	}
+}
+
+// Abort revokes admission and poisons the shared response transport to unblock
+// a stalled call. It is terminal; normal completion uses Expire.
+func (c *HostClient) Abort() {
+	if c == nil {
+		return
+	}
+	c.leaseMu.Lock()
+	c.expired.Store(true)
+	c.leaseMu.Unlock()
+	if c.transport != nil && c.transport.closer != nil {
+		_ = c.transport.closer.Close()
 	}
 }
 
@@ -155,11 +166,12 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 	}
 
 	c.leaseMu.Lock()
-	defer c.leaseMu.Unlock()
 	if c.expired.Load() {
+		c.leaseMu.Unlock()
 		return nil, ErrHostClientExpired
 	}
 	c.pending.Add(1)
+	c.leaseMu.Unlock()
 	defer c.pending.Done()
 
 	t := c.transport

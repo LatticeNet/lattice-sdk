@@ -833,6 +833,12 @@ func FuzzStrictHostResponseValidation(f *testing.F) {
 		success := `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":` + string(payload) + `}}` + "\n"
 		h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: io.NopCloser(strings.NewReader(success))}, 1, "i")
 		result, err := h.Call(context.Background(), "kv.get", map[string]any{"key": "k"})
+		if err != nil {
+			t.Fatalf("canonical success rejected: %v", err)
+		}
+		if !bytes.Equal(result, payload) {
+			t.Fatalf("result=%s want=%s", result, payload)
+		}
 		if err == nil {
 			if len(result) == 0 || out.Len() == 0 {
 				t.Fatal("successful strict response lacked result or host_call")

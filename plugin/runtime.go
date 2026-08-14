@@ -3,11 +3,13 @@ package plugin
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"reflect"
+	"sync"
 )
 
 const (
@@ -17,8 +19,8 @@ const (
 	ActionCall     = "call"
 	ActionExecute  = "execute"
 
-	DefaultMaxRequestBytes     = 1 << 20
-	StderrCompleteMarkerPrefix = "\x1eLATTICE_STDERR_V2_COMPLETE "
+	DefaultMaxRequestBytes = 1 << 20
+	FeatureStderrFramesV1  = "stderr_frames_v1"
 )
 
 type Request struct {
@@ -118,6 +120,62 @@ type RuntimeOptions struct {
 	OpenHostFromEnv bool
 }
 
+type invocationStderrKey struct{}
+
+type invocationStderr struct {
+	runtime    *Runtime
+	generation uint64
+	invocation string
+	mu         sync.Mutex
+	pending    sync.WaitGroup
+	expired    bool
+}
+
+// InvocationStderr returns the invocation-scoped diagnostic stream. Writes are
+// serialized as correlated v2 stderr_chunk frames and rejected after the
+// handler returns. Raw os.Stderr is process-scoped only: handlers must finish
+// all diagnostic producers synchronously before returning; background writes
+// poison worker reuse. Use stdio-json-v1 when process isolation is required.
+func InvocationStderr(ctx context.Context) io.Writer {
+	if ctx == nil {
+		return io.Discard
+	}
+	w, _ := ctx.Value(invocationStderrKey{}).(*invocationStderr)
+	if w == nil {
+		return io.Discard
+	}
+	return w
+}
+
+func (w *invocationStderr) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	if w.expired {
+		w.mu.Unlock()
+		return 0, ErrV2Protocol
+	}
+	w.pending.Add(1)
+	w.mu.Unlock()
+	defer w.pending.Done()
+	frame := struct {
+		Protocol     int    `json:"protocol"`
+		Kind         string `json:"kind"`
+		Generation   uint64 `json:"generation"`
+		InvocationID string `json:"invocation_id"`
+		Data         string `json:"data"`
+	}{2, "stderr_chunk", w.generation, w.invocation, base64.StdEncoding.EncodeToString(p)}
+	if err := w.runtime.emitV2(frame); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (w *invocationStderr) Expire() {
+	w.mu.Lock()
+	w.expired = true
+	w.mu.Unlock()
+	w.pending.Wait()
+}
+
 // V2Session validates the ordered, single-invocation stdio-json-v2 lifecycle.
 // It is intentionally small and transport-agnostic so hosts can reject bad
 // frames before dispatching plugin code.
@@ -188,11 +246,12 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 	}
 	scanner.Buffer(make([]byte, 0, 64*1024), max)
 	ready := struct {
-		Protocol     int    `json:"protocol"`
-		Kind         string `json:"kind"`
-		Generation   uint64 `json:"generation"`
-		InvocationID string `json:"invocation_id"`
-	}{2, "runtime_ready", generation, "runtime"}
+		Protocol     int      `json:"protocol"`
+		Kind         string   `json:"kind"`
+		Generation   uint64   `json:"generation"`
+		InvocationID string   `json:"invocation_id"`
+		Features     []string `json:"features,omitempty"`
+	}{2, "runtime_ready", generation, "runtime", []string{FeatureStderrFramesV1}}
 	session := NewV2Session(generation)
 	usedInvocations := make(map[string]struct{})
 	var serveTransport *hostTransport
@@ -205,6 +264,7 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 	if err := rt.emitV2(ready); err != nil {
 		return err
 	}
+	ready.Features = nil
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -227,10 +287,13 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 		if rt.Host != nil && serveTransport != nil {
 			invHost = rt.Host.scopedTransport(serveTransport, generation, frame.InvocationID)
 		}
-		resp := handler.HandlePluginRequest(ctx, *frame.Request, invHost)
+		diagnostics := &invocationStderr{runtime: rt, generation: generation, invocation: frame.InvocationID}
+		invokeCtx := context.WithValue(ctx, invocationStderrKey{}, diagnostics)
+		resp := handler.HandlePluginRequest(invokeCtx, *frame.Request, invHost)
 		if invHost != nil {
 			invHost.Expire()
 		}
+		diagnostics.Expire()
 		if serveTransport != nil && serveTransport.poisoned.Load() {
 			return fmt.Errorf("v2 transport aborted")
 		}
@@ -252,11 +315,6 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 		}{2, "invoke_result", generation, frame.InvocationID, resp}
 		if err := rt.emitV2(out); err != nil {
 			return err
-		}
-		if rt.Err != nil {
-			if _, err := fmt.Fprintf(rt.Err, "%s%d %s\n", StderrCompleteMarkerPrefix, generation, frame.InvocationID); err != nil {
-				return fmt.Errorf("write stderr completion marker: %w", err)
-			}
 		}
 		ready.InvocationID = frame.InvocationID
 		ready.Kind = "stderr_complete"

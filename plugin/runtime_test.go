@@ -17,57 +17,65 @@ import (
 
 func TestV2SessionRejectsStaleDuplicateAndLate(t *testing.T) {
 	s := NewV2Session(7)
-	if err := s.Accept("invoke", 7, "i1"); err != nil {
+	if err := s.Accept("invoke", 7, "1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Accept("invoke", 7, "i1"); err == nil {
+	if err := s.Accept("invoke", 7, "1"); err == nil {
 		t.Fatal("duplicate invoke accepted")
 	}
 	s = NewV2Session(7)
-	if err := s.Accept("invoke", 6, "i1"); err == nil {
+	if err := s.Accept("invoke", 6, "1"); err == nil {
 		t.Fatal("stale generation accepted")
 	}
 	s = NewV2Session(7)
-	if err := s.Accept("invoke", 7, "i1"); err != nil {
+	if err := s.Accept("invoke", 7, "1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Accept("invoke_ready", 7, "i1"); err == nil {
+	if err := s.Accept("invoke_ready", 7, "1"); err == nil {
 		t.Fatal("late ready accepted")
+	}
+}
+
+func TestV2SessionRejectsNonCanonicalInvocationIDs(t *testing.T) {
+	for _, id := range []string{"", "0", "01", "+1", "-1", "9223372036854775808", "inv-1"} {
+		if err := NewV2Session(7).Accept("invoke", 7, id); err == nil {
+			t.Fatalf("accepted invocation_id %q", id)
+		}
 	}
 }
 
 func TestV2SessionAllowsOnlyCorrelatedPreResultStderrChunks(t *testing.T) {
 	s := NewV2Session(7)
-	if err := s.Accept("invoke", 7, "i1"); err != nil {
+	if err := s.Accept("invoke", 7, "1"); err != nil {
 		t.Fatal(err)
 	}
 	for range 3 {
-		if err := s.Accept("stderr_chunk", 7, "i1"); err != nil {
+		if err := s.Accept("stderr_chunk", 7, "1"); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := s.Accept("stderr_chunk", 8, "i1"); err == nil {
+	if err := s.Accept("stderr_chunk", 8, "1"); err == nil {
 		t.Fatal("wrong generation accepted")
 	}
-	if err := s.Accept("stderr_chunk", 7, "wrong"); err == nil {
+	if err := s.Accept("stderr_chunk", 7, "2"); err == nil {
 		t.Fatal("wrong invocation accepted")
 	}
-	if err := s.Accept("invoke_result", 7, "i1"); err != nil {
+	if err := s.Accept("invoke_result", 7, "1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Accept("stderr_chunk", 7, "i1"); err == nil {
+	if err := s.Accept("stderr_chunk", 7, "1"); err == nil {
 		t.Fatal("post-result chunk accepted")
 	}
-	if err := s.Accept("stderr_complete", 7, "i1"); err != nil {
+	if err := s.Accept("stderr_complete", 7, "1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Accept("stderr_chunk", 7, "i1"); err == nil {
+	if err := s.Accept("stderr_chunk", 7, "1"); err == nil {
 		t.Fatal("post-complete chunk accepted")
 	}
-	if err := s.Accept("invoke_ready", 7, "i1"); err != nil {
+	if err := s.Accept("invoke_ready", 7, "1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Accept("stderr_chunk", 7, "i1"); err == nil {
+	if err := s.Accept("stderr_chunk", 7, "1"); err == nil {
 		t.Fatal("post-ready chunk accepted")
 	}
 }
@@ -324,8 +332,8 @@ func TestRuntimeProtocolStdioJSONV2StrictFrames(t *testing.T) {
 }
 
 func TestServeV2RejectsReusedInvocationWithoutDispatch(t *testing.T) {
-	input := strings.NewReader(`{"protocol":2,"kind":"invoke","generation":9,"invocation_id":"same","request":{"method":"x"}}
-{"protocol":2,"kind":"invoke","generation":9,"invocation_id":"same","request":{"method":"x"}}
+	input := strings.NewReader(`{"protocol":2,"kind":"invoke","generation":9,"invocation_id":"1","request":{"method":"x"}}
+{"protocol":2,"kind":"invoke","generation":9,"invocation_id":"1","request":{"method":"x"}}
 `)
 	var out bytes.Buffer
 	calls := 0
@@ -344,7 +352,7 @@ func TestServeV2RejectsReusedInvocationWithoutDispatch(t *testing.T) {
 
 func TestServeV2RejectsDuplicateJSONKeys(t *testing.T) {
 	var out bytes.Buffer
-	rt := &Runtime{In: strings.NewReader(`{"protocol":2,"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{}}
+	rt := &Runtime{In: strings.NewReader(`{"protocol":2,"protocol":2,"kind":"invoke","generation":1,"invocation_id":"1","request":{}}
 `), Out: &out}
 	if err := rt.ServeV2(context.Background(), HandlerFunc(func(context.Context, Request, *HostClient) Response { t.Fatal("dispatched"); return Response{} }), 1); err == nil {
 		t.Fatal("duplicate frame accepted")
@@ -353,20 +361,20 @@ func TestServeV2RejectsDuplicateJSONKeys(t *testing.T) {
 
 func TestStrictHostCallUsesOuterCorrelationOnly(t *testing.T) {
 	var out bytes.Buffer
-	h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: io.NopCloser(strings.NewReader(`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}
-`))}, 1, "i")
+	h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: io.NopCloser(strings.NewReader(`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}
+`))}, 1, "1")
 	if _, _, err := h.KVGet(context.Background(), "k"); err != nil {
 		t.Fatalf("canonical response rejected: %v", err)
 	}
 	line := out.String()
-	if strings.Contains(line, `"generation":1,"invocation_id":"i","method"`) {
+	if strings.Contains(line, `"generation":1,"invocation_id":"1","method"`) {
 		t.Fatalf("nested correlation duplicated: %s", line)
 	}
 }
 
 func TestStrictHostResponseRejectsWrongOuterCorrelation(t *testing.T) {
-	h := NewInvocationHostClient(HostClientOptions{Output: io.Discard, Responses: io.NopCloser(strings.NewReader(`{"protocol":2,"kind":"host_response","generation":2,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}
-`))}, 1, "i")
+	h := NewInvocationHostClient(HostClientOptions{Output: io.Discard, Responses: io.NopCloser(strings.NewReader(`{"protocol":2,"kind":"host_response","generation":2,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}
+`))}, 1, "1")
 	if _, _, err := h.KVGet(context.Background(), "k"); err == nil {
 		t.Fatal("wrong outer generation accepted")
 	}
@@ -374,7 +382,7 @@ func TestStrictHostResponseRejectsWrongOuterCorrelation(t *testing.T) {
 
 func TestStrictHostRejectsNonClosableReaderWithoutOutput(t *testing.T) {
 	var out bytes.Buffer
-	h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: strings.NewReader(`{}`)}, 1, "i")
+	h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: strings.NewReader(`{}`)}, 1, "1")
 	if _, _, err := h.KVGet(context.Background(), "k"); err == nil {
 		t.Fatal("nonclosable strict host accepted")
 	}
@@ -384,11 +392,11 @@ func TestStrictHostRejectsNonClosableReaderWithoutOutput(t *testing.T) {
 }
 
 func TestStrictHostResponseHostileMatrix(t *testing.T) {
-	base := `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`
+	base := `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`
 	for _, raw := range []string{
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_call_id":"h2","host_response":{"id":"h1","ok":true,"result":{}}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","extra":1,"host_response":{"id":"h1","ok":true,"result":{}}}`,
-		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_call_id":"h2","host_response":{"id":"h1","ok":true,"result":{}}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","extra":1,"host_response":{"id":"h1","ok":true,"result":{}}}`,
+		`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true}}`,
 		base + ` {}`,
 	} {
 		var env strictHostResponseEnvelope
@@ -400,45 +408,45 @@ func TestStrictHostResponseHostileMatrix(t *testing.T) {
 
 func TestStrictHostCallHostileActual(t *testing.T) {
 	cases := []struct{ name, raw string }{
-		{"duplicate_root", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_call_id":"h2","host_response":{"id":"h1","ok":true,"result":{}}}`},
-		{"unknown_root", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","x":1,"host_response":{"id":"h1","ok":true,"result":{}}}`},
-		{"missing_nested_result", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true}}`},
-		{"wrong_generation", `{"protocol":2,"kind":"host_response","generation":2,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
-		{"missing_protocol", `{"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
-		{"missing_kind", `{"protocol":2,"generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
-		{"missing_generation", `{"protocol":2,"kind":"host_response","invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"duplicate_root", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_call_id":"h2","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"unknown_root", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","x":1,"host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"missing_nested_result", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true}}`},
+		{"wrong_generation", `{"protocol":2,"kind":"host_response","generation":2,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"missing_protocol", `{"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"missing_kind", `{"protocol":2,"generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"missing_generation", `{"protocol":2,"kind":"host_response","invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
 		{"missing_invocation", `{"protocol":2,"kind":"host_response","generation":1,"host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
-		{"missing_call_id", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_response":{"id":"h1","ok":true,"result":{}}}`},
-		{"wrong_call_id", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"bad","host_response":{"id":"h1","ok":true,"result":{}}}`},
-		{"missing_nested_id", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"ok":true,"result":{}}}`},
-		{"null_nested_ok", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":null,"result":{}}}`},
-		{"unknown_nested", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{},"x":1}}`},
-		{"duplicate_nested", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","id":"h1","ok":true,"result":{}}}`},
-		{"missing_host_response", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1"}`},
-		{"null_host_response", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":null}`},
-		{"missing_nested_ok", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","result":{}}}`},
-		{"wrong_invocation", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"wrong","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
-		{"wrong_nested_id", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"wrong","ok":true,"result":{}}}`},
-		{"union_result_error", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":"x","result":{}}}`},
-		{"failure_result_present", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":"x","result":{}}}`},
-		{"success_result_null", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":null}}`},
-		{"success_error_null", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{},"error":null}}`},
-		{"success_error_nonempty", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{},"error":"bad"}}`},
-		{"failure_error_empty", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":""}}`},
-		{"failure_error_null", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":null}}`},
-		{"failure_error_nonstring", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":3}}`},
-		{"failure_result_null", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":"x","result":null}}`},
-		{"null_protocol", `{"protocol":null,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
-		{"null_kind", `{"protocol":2,"kind":null,"generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
-		{"null_generation", `{"protocol":2,"kind":"host_response","generation":null,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"missing_call_id", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"wrong_call_id", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"bad","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"missing_nested_id", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"ok":true,"result":{}}}`},
+		{"null_nested_ok", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":null,"result":{}}}`},
+		{"unknown_nested", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{},"x":1}}`},
+		{"duplicate_nested", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","id":"h1","ok":true,"result":{}}}`},
+		{"missing_host_response", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1"}`},
+		{"null_host_response", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":null}`},
+		{"missing_nested_ok", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","result":{}}}`},
+		{"wrong_invocation", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"2","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"wrong_nested_id", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"2","ok":true,"result":{}}}`},
+		{"union_result_error", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":"x","result":{}}}`},
+		{"failure_result_present", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":"x","result":{}}}`},
+		{"success_result_null", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":null}}`},
+		{"success_error_null", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{},"error":null}}`},
+		{"success_error_nonempty", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{},"error":"bad"}}`},
+		{"failure_error_empty", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":""}}`},
+		{"failure_error_null", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":null}}`},
+		{"failure_error_nonstring", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":3}}`},
+		{"failure_result_null", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":"x","result":null}}`},
+		{"null_protocol", `{"protocol":null,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"null_kind", `{"protocol":2,"kind":null,"generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"null_generation", `{"protocol":2,"kind":"host_response","generation":null,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
 		{"null_invocation", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":null,"host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
-		{"null_call_id", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":null,"host_response":{"id":"h1","ok":true,"result":{}}}`},
-		{"null_nested_id", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":null,"ok":true,"result":{}}}`},
-		{"missing_failure_error", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false}}`},
-		{"wrong_protocol", `{"protocol":1,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
-		{"wrong_kind", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
-		{"trailing", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}} trailing`},
-		{"oversize", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{"x":"` + strings.Repeat("x", DefaultMaxHostResponseBytes) + `"}}}`},
+		{"null_call_id", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":null,"host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"null_nested_id", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":null,"ok":true,"result":{}}}`},
+		{"missing_failure_error", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":false}}`},
+		{"wrong_protocol", `{"protocol":1,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"wrong_kind", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`},
+		{"trailing", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}} trailing`},
+		{"oversize", `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{"x":"` + strings.Repeat("x", DefaultMaxHostResponseBytes) + `"}}}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) { assertHostCallRejected(t, tc.raw) })
@@ -448,7 +456,7 @@ func TestStrictHostCallHostileActual(t *testing.T) {
 func assertHostCallRejected(t *testing.T, raw string) {
 	t.Helper()
 	var out bytes.Buffer
-	h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: io.NopCloser(strings.NewReader(raw + "\n"))}, 1, "i")
+	h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: io.NopCloser(strings.NewReader(raw + "\n"))}, 1, "1")
 	if _, _, err := h.KVGet(context.Background(), "k"); err == nil {
 		t.Fatal("hostile response accepted")
 	}
@@ -458,8 +466,8 @@ func assertHostCallRejected(t *testing.T, raw string) {
 }
 
 func TestStrictHostCallErrorWithoutResult(t *testing.T) {
-	h := NewInvocationHostClient(HostClientOptions{Output: io.Discard, Responses: io.NopCloser(strings.NewReader(`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":"denied"}}
-`))}, 1, "i")
+	h := NewInvocationHostClient(HostClientOptions{Output: io.Discard, Responses: io.NopCloser(strings.NewReader(`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":false,"error":"denied"}}
+`))}, 1, "1")
 	if _, _, err := h.KVGet(context.Background(), "k"); err == nil || !strings.Contains(err.Error(), "denied") {
 		t.Fatalf("error=%v", err)
 	}
@@ -481,7 +489,7 @@ func TestV1HostCallWireExact(t *testing.T) {
 func TestCancelledHostCallAbortsAndLateCallIsSilent(t *testing.T) {
 	out := &lockedTestWriter{call: make(chan struct{}, 1)}
 	pr, pw := io.Pipe()
-	h := NewInvocationHostClient(HostClientOptions{Output: out, Responses: pr}, 1, "i")
+	h := NewInvocationHostClient(HostClientOptions{Output: out, Responses: pr}, 1, "1")
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { _, _, err := h.KVGet(ctx, "k"); done <- err }()
@@ -507,7 +515,7 @@ func TestCancelAfterHostWritePoisonsAndPreventsReuse(t *testing.T) {
 	pr, _ := io.Pipe()
 	ctx, cancel := context.WithCancel(context.Background())
 	out := &cancelAfterWriteWriter{cancel: cancel}
-	h := NewInvocationHostClient(HostClientOptions{Output: out, Responses: pr}, 1, "i")
+	h := NewInvocationHostClient(HostClientOptions{Output: out, Responses: pr}, 1, "1")
 	if _, _, err := h.KVGet(ctx, "k"); err == nil {
 		t.Fatal("cancelled call succeeded")
 	}
@@ -529,7 +537,7 @@ func TestCanonicalV2GoldenFrames(t *testing.T) {
 	if len(lines) != 8 {
 		t.Fatalf("golden lines=%d", len(lines))
 	}
-	if strings.Contains(string(b), `"generation":7,"invocation_id":"inv-1","method"`) {
+	if strings.Contains(string(b), `"generation":7,"invocation_id":"1","method"`) {
 		t.Fatal("nested correlation in golden")
 	}
 	if !strings.Contains(lines[2], `"kind":"host_call"`) || !strings.Contains(lines[3], `"kind":"host_response"`) || !strings.Contains(lines[4], `"kind":"stderr_chunk"`) {
@@ -539,7 +547,7 @@ func TestCanonicalV2GoldenFrames(t *testing.T) {
 
 func TestRuntimeGoldenHasExactLifecycleKinds(t *testing.T) {
 	var out bytes.Buffer
-	rt := &Runtime{In: strings.NewReader(`{"protocol":2,"kind":"invoke","generation":7,"invocation_id":"inv-1","request":{}}
+	rt := &Runtime{In: strings.NewReader(`{"protocol":2,"kind":"invoke","generation":7,"invocation_id":"1","request":{}}
 `), Out: &out}
 	if err := rt.ServeV2(context.Background(), HandlerFunc(func(ctx context.Context, _ Request, _ *HostClient) Response {
 		_, _ = InvocationStderr(ctx).Write([]byte("diag"))
@@ -609,7 +617,7 @@ func TestRuntimeGoldenHostKVExact(t *testing.T) {
 func TestServeV2NonclosableHostFailsFacadeClosed(t *testing.T) {
 	var out bytes.Buffer
 	h := NewHostClient(HostClientOptions{Output: &out, Responses: strings.NewReader(`{}`)})
-	rt := &Runtime{In: strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{}}
+	rt := &Runtime{In: strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"1","request":{}}
 `), Out: &out, Host: h}
 	if err := rt.ServeV2(context.Background(), HandlerFunc(func(ctx context.Context, _ Request, host *HostClient) Response {
 		if _, _, err := host.KVGet(ctx, "k"); err == nil {
@@ -624,7 +632,7 @@ func TestServeV2NonclosableHostFailsFacadeClosed(t *testing.T) {
 func TestServeV2RejectsMismatchedHostOutput(t *testing.T) {
 	var hostOut, runtimeOut bytes.Buffer
 	h := NewHostClient(HostClientOptions{Output: &hostOut, Responses: io.NopCloser(strings.NewReader(`{}\n`))})
-	rt := &Runtime{In: strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{}}\n`), Out: &runtimeOut, Host: h}
+	rt := &Runtime{In: strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"1","request":{}}\n`), Out: &runtimeOut, Host: h}
 	if err := rt.ServeV2(context.Background(), HandlerFunc(func(context.Context, Request, *HostClient) Response { return Response{OK: true} }), 1); err == nil {
 		t.Fatal("mismatched host output accepted")
 	}
@@ -636,7 +644,7 @@ func TestServeV2RejectsMismatchedHostOutput(t *testing.T) {
 func TestHostClientQueuedCancelDoesNotPoisonActiveExchange(t *testing.T) {
 	pr, pw := io.Pipe()
 	out := lockedTestWriter{call: make(chan struct{})}
-	h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: pr}, 1, "inv")
+	h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: pr}, 1, "1")
 	aDone := make(chan error, 1)
 	go func() { _, err := h.Call(context.Background(), "kv.get", map[string]any{"key": "a"}); aDone <- err }()
 	select {
@@ -652,7 +660,7 @@ func TestHostClientQueuedCancelDoesNotPoisonActiveExchange(t *testing.T) {
 		t.Fatalf("queued call error=%v", err)
 	}
 	before := out.Len()
-	_, _ = io.WriteString(pw, `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"inv","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{"value":"a"}}}`+"\n")
+	_, _ = io.WriteString(pw, `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{"value":"a"}}}`+"\n")
 	if err := <-aDone; err != nil {
 		t.Fatalf("active call failed after queued cancel: %v", err)
 	}
@@ -686,19 +694,19 @@ func TestNewInvocationHostClientRejectsZeroCorrelation(t *testing.T) {
 }
 
 func TestDecodeInvokeV2HostileMatrix(t *testing.T) {
-	base := `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{}}`
+	base := `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"1","request":{}}`
 	for _, tc := range []struct{ name, raw string }{
-		{"unknown", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{},"x":1}`},
+		{"unknown", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"1","request":{},"x":1}`},
 		{"missing", `{"protocol":2,"kind":"invoke","generation":1,"request":{}}`},
-		{"null", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":null}`},
+		{"null", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"1","request":null}`},
 		{"trailing", base + ` {}`},
-		{"wrong_generation", `{"protocol":2,"kind":"invoke","generation":2,"invocation_id":"i","request":{}}`},
-		{"wrong_protocol", `{"protocol":1,"kind":"invoke","generation":1,"invocation_id":"i","request":{}}`},
-		{"wrong_kind", `{"protocol":2,"kind":"ready","generation":1,"invocation_id":"i","request":{}}`},
-		{"zero_generation", `{"protocol":2,"kind":"invoke","generation":0,"invocation_id":"i","request":{}}`},
-		{"nested_duplicate", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{"x":1,"x":2}}`},
-		{"duplicate", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","invocation_id":"j","request":{}}`},
-		{"oversize", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{"blob":"` + strings.Repeat("x", DefaultMaxRequestBytes) + `"}}`},
+		{"wrong_generation", `{"protocol":2,"kind":"invoke","generation":2,"invocation_id":"1","request":{}}`},
+		{"wrong_protocol", `{"protocol":1,"kind":"invoke","generation":1,"invocation_id":"1","request":{}}`},
+		{"wrong_kind", `{"protocol":2,"kind":"ready","generation":1,"invocation_id":"1","request":{}}`},
+		{"zero_generation", `{"protocol":2,"kind":"invoke","generation":0,"invocation_id":"1","request":{}}`},
+		{"nested_duplicate", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"1","request":{"x":1,"x":2}}`},
+		{"duplicate", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"1","invocation_id":"2","request":{}}`},
+		{"oversize", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"1","request":{"blob":"` + strings.Repeat("x", DefaultMaxRequestBytes) + `"}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := decodeInvokeV2([]byte(tc.raw), 1); err == nil {
@@ -710,7 +718,7 @@ func TestDecodeInvokeV2HostileMatrix(t *testing.T) {
 
 func TestServeV2AllowsNilHost(t *testing.T) {
 	var out bytes.Buffer
-	rt := &Runtime{In: strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{}}
+	rt := &Runtime{In: strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"1","request":{}}
 `), Out: &out}
 	if err := rt.ServeV2(context.Background(), HandlerFunc(func(_ context.Context, _ Request, host *HostClient) Response {
 		if host == nil {
@@ -726,8 +734,8 @@ func TestServeV2AllowsNilHost(t *testing.T) {
 }
 
 func TestServeV2TwoInvocationsReuseRuntimeTransport(t *testing.T) {
-	input := strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"a","request":{}}
-{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"b","request":{}}
+	input := strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"1","request":{}}
+{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"2","request":{}}
 `)
 	var out bytes.Buffer
 	pr, pw := io.Pipe()
@@ -778,7 +786,7 @@ func (w *lockedTestWriter) Snapshot() string { w.mu.Lock(); defer w.mu.Unlock();
 func (w *lockedTestWriter) Len() int         { w.mu.Lock(); defer w.mu.Unlock(); return w.b.Len() }
 
 func TestServeV2HostCallResponsePrecedesReady(t *testing.T) {
-	input := strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"a","request":{}}
+	input := strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"1","request":{}}
 `)
 	out := &lockedTestWriter{call: make(chan struct{}, 1)}
 	pr, pw := io.Pipe()
@@ -803,7 +811,7 @@ func TestServeV2HostCallResponsePrecedesReady(t *testing.T) {
 		t.Fatal("runtime completed before response")
 	default:
 	}
-	if _, err := io.WriteString(pw, `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"a","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`+"\n"); err != nil {
+	if _, err := io.WriteString(pw, `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`+"\n"); err != nil {
 		t.Fatal(err)
 	}
 	if err := <-done; err != nil {
@@ -816,7 +824,7 @@ func TestServeV2HostCallResponsePrecedesReady(t *testing.T) {
 }
 
 func TestServeV2SpawnedCallBlocksReadyAndRevokesFacade(t *testing.T) {
-	input := strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"a","request":{}}
+	input := strings.NewReader(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"1","request":{}}
 `)
 	out := &lockedTestWriter{call: make(chan struct{}, 1)}
 	pr, pw := io.Pipe()
@@ -837,7 +845,7 @@ func TestServeV2SpawnedCallBlocksReadyAndRevokesFacade(t *testing.T) {
 	if strings.Contains(snap, `"invoke_result"`) || strings.Contains(snap, `"invoke_ready"`) {
 		t.Fatal("terminal output before response")
 	}
-	_, _ = io.WriteString(pw, `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"a","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`+"\n")
+	_, _ = io.WriteString(pw, `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`+"\n")
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
@@ -855,8 +863,8 @@ func TestServeV2SpawnedCallBlocksReadyAndRevokesFacade(t *testing.T) {
 }
 
 func FuzzV2Session(f *testing.F) {
-	f.Add("invoke", uint64(1), "i")
-	f.Add("invoke_result", uint64(1), "i")
+	f.Add("invoke", uint64(1), "1")
+	f.Add("invoke_result", uint64(1), "1")
 	f.Fuzz(func(t *testing.T, kind string, generation uint64, invocation string) {
 		s := NewV2Session(1)
 		_ = s.Accept(kind, generation, invocation)
@@ -864,7 +872,7 @@ func FuzzV2Session(f *testing.F) {
 }
 
 func FuzzStrictV2Decoder(f *testing.F) {
-	f.Add([]byte(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"i","request":{}}`))
+	f.Add([]byte(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"1","request":{}}`))
 	f.Fuzz(func(t *testing.T, raw []byte) {
 		frame, err := decodeInvokeV2(raw, 1)
 		if err == nil && (frame.Protocol != 2 || frame.Kind != "invoke" || frame.Generation != 1 || frame.InvocationID == "" || frame.Request == nil) {
@@ -874,7 +882,7 @@ func FuzzStrictV2Decoder(f *testing.F) {
 }
 
 func FuzzStrictHostResponseValidation(f *testing.F) {
-	valid := []byte(`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`)
+	valid := []byte(`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":{}}}`)
 	f.Add(valid)
 	f.Add([]byte(`{"":0,"":1}`))
 	f.Fuzz(func(t *testing.T, raw []byte) {
@@ -892,19 +900,19 @@ func FuzzStrictHostResponseValidation(f *testing.F) {
 		}
 		base := string(payload)
 		for _, hostile := range []string{
-			`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","protocol":2,"host_response":{"id":"h1","ok":true,"result":` + base + `}}`,
-			`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","unknown":1,"host_response":{"id":"h1","ok":true,"result":` + base + `}}`,
-			`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":` + base + `,"unknown":1}}`,
-			`{"protocol":null,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":` + base + `}}`,
-			`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"wrong","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":` + base + `}}`,
-			`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"wrong","ok":true,"result":` + base + `}}`,
-			`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false}}`,
+			`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","protocol":2,"host_response":{"id":"h1","ok":true,"result":` + base + `}}`,
+			`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","unknown":1,"host_response":{"id":"h1","ok":true,"result":` + base + `}}`,
+			`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":` + base + `,"unknown":1}}`,
+			`{"protocol":null,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":` + base + `}}`,
+			`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"2","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":` + base + `}}`,
+			`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"2","ok":true,"result":` + base + `}}`,
+			`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":false}}`,
 		} {
 			assertHostCallRejected(t, hostile)
 		}
 		var out bytes.Buffer
-		success := `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":` + string(payload) + `}}` + "\n"
-		h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: io.NopCloser(strings.NewReader(success))}, 1, "i")
+		success := `{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":true,"result":` + string(payload) + `}}` + "\n"
+		h := NewInvocationHostClient(HostClientOptions{Output: &out, Responses: io.NopCloser(strings.NewReader(success))}, 1, "1")
 		result, err := h.Call(context.Background(), "kv.get", map[string]any{"key": "k"})
 		if err != nil {
 			t.Fatalf("canonical success rejected: %v", err)
@@ -919,9 +927,9 @@ func FuzzStrictHostResponseValidation(f *testing.F) {
 }
 
 func TestStrictHostResponseFuzzSeeds(t *testing.T) {
-	for _, raw := range []string{`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"i","host_call_id":"h1","host_response":{"id":"h1","ok":false}}`, `{"protocol":null}`} {
+	for _, raw := range []string{`{"protocol":2,"kind":"host_response","generation":1,"invocation_id":"1","host_call_id":"h1","host_response":{"id":"h1","ok":false}}`, `{"protocol":null}`} {
 		pr := io.NopCloser(strings.NewReader(raw + "\n"))
-		h := NewInvocationHostClient(HostClientOptions{Output: io.Discard, Responses: pr}, 1, "i")
+		h := NewInvocationHostClient(HostClientOptions{Output: io.Discard, Responses: pr}, 1, "1")
 		if _, err := h.Call(context.Background(), "kv.get", map[string]any{"key": "k"}); err == nil {
 			t.Fatalf("hostile seed accepted: %s", raw)
 		}

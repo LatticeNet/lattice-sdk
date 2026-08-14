@@ -194,7 +194,7 @@ func NewV2Session(generation uint64) *V2Session {
 	return &V2Session{Generation: generation, state: "ready"}
 }
 func (s *V2Session) Accept(kind string, generation uint64, invocation string) error {
-	if s == nil || generation != s.Generation || invocation == "" {
+	if s == nil || generation != s.Generation || !validInvocationID(invocation) {
 		return ErrV2Protocol
 	}
 	switch s.state {
@@ -373,7 +373,7 @@ func decodeInvokeV2(raw []byte, generation uint64) (struct {
 		InvocationID string   `json:"invocation_id"`
 		Request      *Request `json:"request"`
 	}
-	if err := strictDecodeFrame(raw, &frame); err != nil || frame.Protocol != 2 || frame.Kind != "invoke" || frame.Generation == 0 || frame.Generation != generation || frame.InvocationID == "" || frame.Request == nil {
+	if err := strictDecodeFrame(raw, &frame); err != nil || frame.Protocol != 2 || frame.Kind != "invoke" || frame.Generation == 0 || frame.Generation != generation || !validInvocationID(frame.InvocationID) || frame.Request == nil {
 		return frame, ErrV2Protocol
 	}
 	return frame, nil

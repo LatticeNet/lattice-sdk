@@ -104,17 +104,16 @@ func (f HandlerFunc) HandlePluginRequest(ctx context.Context, req Request, host 
 type Runtime struct {
 	In              io.Reader
 	Out             io.Writer
-	Err             io.Writer
 	Host            *HostClient
 	MaxRequestBytes int
 	closeHost       func()
 	v2Transport     *hostTransport
+	writeMu         sync.Mutex
 }
 
 type RuntimeOptions struct {
 	In              io.Reader
 	Out             io.Writer
-	Err             io.Writer
 	Host            *HostClient
 	MaxRequestBytes int
 	OpenHostFromEnv bool
@@ -133,9 +132,10 @@ type invocationStderr struct {
 
 // InvocationStderr returns the invocation-scoped diagnostic stream. Writes are
 // serialized as correlated v2 stderr_chunk frames and rejected after the
-// handler returns. Raw os.Stderr is process-scoped only: handlers must finish
-// all diagnostic producers synchronously before returning; background writes
-// poison worker reuse. Use stdio-json-v1 when process isolation is required.
+// handler returns. Raw os.Stderr is process-scoped only and the host continuously
+// drains it into bounded counters without attribution or external disclosure;
+// InvocationStderr is the only invocation diagnostic channel. Use
+// stdio-json-v1 when process isolation is required.
 func InvocationStderr(ctx context.Context) io.Writer {
 	if ctx == nil {
 		return io.Discard
@@ -148,6 +148,9 @@ func InvocationStderr(ctx context.Context) io.Writer {
 }
 
 func (w *invocationStderr) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
 	w.mu.Lock()
 	if w.expired {
 		w.mu.Unlock()
@@ -202,7 +205,13 @@ func (s *V2Session) Accept(kind string, generation uint64, invocation string) er
 		s.invocation = invocation
 		s.state = "invoked"
 	case "invoked":
-		if kind != "invoke_result" || invocation != s.invocation {
+		if invocation != s.invocation {
+			return ErrV2Protocol
+		}
+		if kind == "stderr_chunk" {
+			return nil
+		}
+		if kind != "invoke_result" {
 			return ErrV2Protocol
 		}
 		s.state = "result"
@@ -380,6 +389,8 @@ func (rt *Runtime) emitV2(v any) error {
 		defer t.writeMu.Unlock()
 		return json.NewEncoder(t.output).Encode(v)
 	}
+	rt.writeMu.Lock()
+	defer rt.writeMu.Unlock()
 	return json.NewEncoder(rt.Out).Encode(v)
 }
 
@@ -391,10 +402,6 @@ func NewRuntime(opts RuntimeOptions) *Runtime {
 	out := opts.Out
 	if out == nil {
 		out = os.Stdout
-	}
-	errOut := opts.Err
-	if errOut == nil {
-		errOut = os.Stderr
 	}
 	maxRequestBytes := opts.MaxRequestBytes
 	if maxRequestBytes <= 0 {
@@ -408,7 +415,6 @@ func NewRuntime(opts RuntimeOptions) *Runtime {
 	return &Runtime{
 		In:              in,
 		Out:             out,
-		Err:             errOut,
 		Host:            host,
 		MaxRequestBytes: maxRequestBytes,
 		closeHost:       closeHost,

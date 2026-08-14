@@ -36,6 +36,74 @@ func TestV2SessionRejectsStaleDuplicateAndLate(t *testing.T) {
 	}
 }
 
+func TestV2SessionAllowsOnlyCorrelatedPreResultStderrChunks(t *testing.T) {
+	s := NewV2Session(7)
+	if err := s.Accept("invoke", 7, "i1"); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if err := s.Accept("stderr_chunk", 7, "i1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Accept("stderr_chunk", 8, "i1"); err == nil {
+		t.Fatal("wrong generation accepted")
+	}
+	if err := s.Accept("stderr_chunk", 7, "wrong"); err == nil {
+		t.Fatal("wrong invocation accepted")
+	}
+	if err := s.Accept("invoke_result", 7, "i1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Accept("stderr_chunk", 7, "i1"); err == nil {
+		t.Fatal("post-result chunk accepted")
+	}
+	if err := s.Accept("stderr_complete", 7, "i1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Accept("stderr_chunk", 7, "i1"); err == nil {
+		t.Fatal("post-complete chunk accepted")
+	}
+	if err := s.Accept("invoke_ready", 7, "i1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Accept("stderr_chunk", 7, "i1"); err == nil {
+		t.Fatal("post-ready chunk accepted")
+	}
+}
+
+func TestInvocationStderrNoHostSerializesConcurrentFrames(t *testing.T) {
+	var out bytes.Buffer
+	rt := &Runtime{Out: &out}
+	w := &invocationStderr{runtime: rt, generation: 4, invocation: "i"}
+	var wg sync.WaitGroup
+	for i := range 64 {
+		wg.Add(1)
+		go func() { defer wg.Done(); _, _ = w.Write([]byte(strconv.Itoa(i))) }()
+	}
+	wg.Wait()
+	if n, err := w.Write(nil); n != 0 || err != nil {
+		t.Fatalf("empty write=(%d,%v)", n, err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(out.Bytes()))
+	seen := 0
+	for {
+		var frame map[string]any
+		if err := dec.Decode(&frame); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			t.Fatalf("interleaved frame: %v\n%s", err, out.String())
+		}
+		if frame["kind"] != "stderr_chunk" {
+			t.Fatalf("frame=%v", frame)
+		}
+		seen++
+	}
+	if seen != 64 {
+		t.Fatalf("frames=%d want 64", seen)
+	}
+}
+
 func TestRuntimeServeFramesRequestsAndResponses(t *testing.T) {
 	in := strings.NewReader(`{"action":"call","payload":{"service":"example/items","method":"list","payload":{"want":"nodes"}}}` + "\n")
 	var out bytes.Buffer

@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -12,22 +13,33 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 const (
-	HostMethodRPCCall            = "rpc.call"
-	HostMethodHTTPDo             = "http.do"
-	HostMethodHTTPOperatorDo     = "http.operator.do"
-	HostMethodKVGet              = "kv.get"
-	HostMethodKVPut              = "kv.put"
-	HostMethodNotifySend         = "notify.send"
-	HostMethodLogWrite           = "log.write"
-	HostMethodSecretGet          = "secret.get"
-	HostMethodSecretPut          = "secret.put"
-	HostMethodSecretDelete       = "secret.delete"
-	DefaultMaxHostResponseBytes  = 1 << 20
-	defaultHostResponseFD        = 3
-	hostResponseFDEnvironmentKey = "LATTICE_HOST_RESPONSE_FD"
+	HostMethodRPCCall        = "rpc.call"
+	HostMethodHTTPDo         = "http.do"
+	HostMethodHTTPOperatorDo = "http.operator.do"
+	HostMethodKVGet          = "kv.get"
+	HostMethodKVPut          = "kv.put"
+	HostMethodNotifySend     = "notify.send"
+	HostMethodLogWrite       = "log.write"
+	HostMethodSecretGet      = "secret.get"
+	HostMethodSecretPut      = "secret.put"
+	HostMethodSecretDelete   = "secret.delete"
+	// DefaultMaxHostResponsePayloadBytes is the maximum decoded
+	// host_response.result payload.
+	DefaultMaxHostResponsePayloadBytes = 4 << 20
+	// DefaultMaxHostResponseBytes is the compatibility alias used by
+	// HostClientOptions.MaxResponseBytes.
+	DefaultMaxHostResponseBytes = DefaultMaxHostResponsePayloadBytes
+	// DefaultMaxHostResponseFrameOverheadBytes independently bounds the
+	// correlation envelope around a maximum result payload.
+	DefaultMaxHostResponseFrameOverheadBytes = 4 << 10
+	// DefaultMaxHostResponseFrameBytes excludes the JSONL delimiter.
+	DefaultMaxHostResponseFrameBytes = DefaultMaxHostResponseBytes + DefaultMaxHostResponseFrameOverheadBytes
+	defaultHostResponseFD            = 3
+	hostResponseFDEnvironmentKey     = "LATTICE_HOST_RESPONSE_FD"
 )
 
 var ErrHostUnavailable = errors.New("host response fd unavailable")
@@ -35,11 +47,29 @@ var ErrHostUnavailable = errors.New("host response fd unavailable")
 type HostClient struct {
 	output           io.Writer
 	responses        *bufio.Scanner
+	transport        *hostTransport
 	maxResponseBytes int
+	maxFrameBytes    int
 
-	mu     sync.Mutex
-	nextID int
+	leaseMu      sync.Mutex
+	pending      sync.WaitGroup
+	generation   uint64
+	invocationID string
+	expired      atomic.Bool
+	strict       bool
 }
+
+type hostTransport struct {
+	output    io.Writer
+	responses *bufio.Scanner
+	writeMu   sync.Mutex
+	exchange  chan struct{}
+	nextID    uint64
+	closer    io.Closer
+	poisoned  atomic.Bool
+}
+
+var ErrHostClientExpired = errors.New("invocation host client expired")
 
 type HostClientOptions struct {
 	Output           io.Writer
@@ -55,13 +85,115 @@ func NewHostClient(opts HostClientOptions) *HostClient {
 	client := &HostClient{
 		output:           opts.Output,
 		maxResponseBytes: maxResponseBytes,
+		maxFrameBytes:    hostResponseFrameLimit(maxResponseBytes),
 	}
 	if opts.Responses != nil {
 		scanner := bufio.NewScanner(opts.Responses)
-		scanner.Buffer(make([]byte, 0, 64*1024), maxResponseBytes)
+		scanner.Buffer(make([]byte, 0, 64*1024), scannerCapacity(client.maxFrameBytes))
 		client.responses = scanner
 	}
+	var closer io.Closer
+	if c, ok := opts.Responses.(io.Closer); ok {
+		closer = c
+	}
+	client.transport = &hostTransport{output: client.output, responses: client.responses, closer: closer, exchange: make(chan struct{}, 1)}
+	client.transport.exchange <- struct{}{}
 	return client
+}
+
+// NewInvocationHostClient creates a lease-scoped facade. Expire it before the
+// worker emits invoke_ready so late plugin calls cannot reach the host.
+func NewInvocationHostClient(opts HostClientOptions, generation uint64, invocationID string) *HostClient {
+	c := NewHostClient(opts)
+	if generation == 0 || !validInvocationID(invocationID) {
+		c.output = nil
+		c.responses = nil
+		c.transport = nil
+	}
+	if _, ok := opts.Responses.(io.Closer); !ok {
+		c.output = nil
+		c.responses = nil
+		c.transport = nil
+	}
+	c.generation, c.invocationID = generation, invocationID
+	c.strict = true
+	return c
+}
+
+func (c *HostClient) scoped(generation uint64, invocationID string) *HostClient {
+	if c == nil {
+		return nil
+	}
+	return &HostClient{output: c.output, responses: c.responses, transport: c.transport, maxResponseBytes: c.maxResponseBytes, maxFrameBytes: c.maxFrameBytes, generation: generation, invocationID: invocationID, strict: true}
+}
+
+func (c *HostClient) scopedTransport(t *hostTransport, generation uint64, invocationID string) *HostClient {
+	if c == nil {
+		return nil
+	}
+	if t == nil || t.closer == nil {
+		return &HostClient{generation: generation, invocationID: invocationID, strict: true}
+	}
+	return &HostClient{output: t.output, responses: t.responses, transport: t, maxResponseBytes: c.maxResponseBytes, maxFrameBytes: c.maxFrameBytes, generation: generation, invocationID: invocationID, strict: true}
+}
+
+func hostResponseFrameLimit(payloadLimit int) int {
+	if payloadLimit <= 0 {
+		payloadLimit = DefaultMaxHostResponseBytes
+	}
+	const overhead = DefaultMaxHostResponseFrameOverheadBytes
+	maxInt := int(^uint(0) >> 1)
+	if payloadLimit > maxInt-overhead {
+		return maxInt
+	}
+	return payloadLimit + overhead
+}
+
+func scannerCapacity(frameLimit int) int {
+	maxInt := int(^uint(0) >> 1)
+	if frameLimit >= maxInt {
+		return maxInt
+	}
+	return frameLimit + 1
+}
+
+func validInvocationID(id string) bool {
+	n, err := strconv.ParseInt(id, 10, 64)
+	return err == nil && n > 0 && strconv.FormatInt(n, 10) == id
+}
+
+func validHostCallID(id string) bool {
+	if len(id) < 2 || id[0] != 'h' {
+		return false
+	}
+	n, err := strconv.ParseUint(id[1:], 10, 64)
+	return err == nil && n > 0 && "h"+strconv.FormatUint(n, 10) == id
+}
+
+func (c *HostClient) Expire() {
+	if c != nil {
+		c.leaseMu.Lock()
+		c.expired.Store(true)
+		c.leaseMu.Unlock()
+		c.pending.Wait()
+	}
+}
+
+// Abort revokes admission and poisons the shared response transport to unblock
+// a stalled call. It is terminal; normal completion uses Expire.
+func (c *HostClient) Abort() {
+	if c == nil {
+		return
+	}
+	c.leaseMu.Lock()
+	c.expired.Store(true)
+	c.leaseMu.Unlock()
+	if c.transport != nil {
+		c.transport.poisoned.Store(true)
+	}
+	if c.transport != nil && c.transport.closer != nil {
+		_ = c.transport.closer.Close()
+	}
 }
 
 func NewHostClientFromEnv(output io.Writer) (*HostClient, func()) {
@@ -96,31 +228,152 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 		return nil, err
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.leaseMu.Lock()
+	if c.expired.Load() {
+		c.leaseMu.Unlock()
+		return nil, ErrHostClientExpired
+	}
+	if c.transport != nil && c.transport.poisoned.Load() {
+		c.leaseMu.Unlock()
+		return nil, ErrHostClientExpired
+	}
+	c.pending.Add(1)
+	c.leaseMu.Unlock()
+	defer c.pending.Done()
 
-	c.nextID++
-	id := fmt.Sprintf("h%d", c.nextID)
-	if err := json.NewEncoder(c.output).Encode(hostCallEnvelope{
-		HostCall: hostCall{ID: id, Method: method, Params: params},
-	}); err != nil {
+	t := c.transport
+	if t == nil {
+		t = &hostTransport{output: c.output, responses: c.responses}
+		c.transport = t
+	}
+	select {
+	case <-t.exchange:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	defer func() { t.exchange <- struct{}{} }()
+	t.writeMu.Lock()
+	if t.nextID == ^uint64(0) {
+		t.writeMu.Unlock()
+		return nil, fmt.Errorf("host call id exhausted")
+	}
+	t.nextID++
+	id := fmt.Sprintf("h%d", t.nextID)
+	if c.expired.Load() {
+		t.writeMu.Unlock()
+		return nil, ErrHostClientExpired
+	}
+	var frame any = hostCallEnvelope{HostCall: hostCall{ID: id, Method: method, Params: params}}
+	if c.strict {
+		if method == "" || params == nil {
+			t.writeMu.Unlock()
+			return nil, fmt.Errorf("invalid strict host_call payload")
+		}
+		frame = strictHostCallEnvelope{Protocol: 2, Kind: "host_call", Generation: c.generation, InvocationID: c.invocationID, HostCallID: id, HostCall: strictHostCallPayload{ID: id, Method: method, Params: params}}
+	}
+	if err := json.NewEncoder(t.output).Encode(frame); err != nil {
+		t.writeMu.Unlock()
 		return nil, fmt.Errorf("write host_call: %w", err)
 	}
+	t.writeMu.Unlock()
 	if err := ctx.Err(); err != nil {
+		c.Abort()
 		return nil, err
 	}
-	if !c.responses.Scan() {
-		if err := c.responses.Err(); err != nil {
-			return nil, fmt.Errorf("read host_response: %w", err)
+	type scanResult struct {
+		raw []byte
+		err error
+	}
+	results := make(chan scanResult, 1)
+	go func() {
+		if !t.responses.Scan() {
+			if err := t.responses.Err(); err != nil {
+				results <- scanResult{err: fmt.Errorf("read host_response: %w", err)}
+			} else {
+				results <- scanResult{err: errors.New("read host_response: eof")}
+			}
+			return
 		}
-		return nil, errors.New("read host_response: eof")
+		results <- scanResult{raw: append([]byte(nil), t.responses.Bytes()...)}
+	}()
+	var scanned scanResult
+	select {
+	case scanned = <-results:
+	case <-ctx.Done():
+		c.Abort()
+		<-results
+		return nil, ctx.Err()
+	}
+	if scanned.err != nil {
+		return nil, scanned.err
+	}
+	if len(scanned.raw) > c.maxFrameBytes {
+		return nil, fmt.Errorf("read host_response: frame exceeds limit")
 	}
 	var env hostResponseEnvelope
-	if err := json.Unmarshal(c.responses.Bytes(), &env); err != nil {
+	if c.strict {
+		var strictEnv strictHostResponseEnvelope
+		if err := strictDecodeFrame(scanned.raw, &strictEnv); err != nil {
+			return nil, fmt.Errorf("decode host_response: %w", err)
+		}
+		env.Protocol, env.Kind, env.Generation, env.InvocationID, env.HostCallID = strictEnv.Protocol, strictEnv.Kind, strictEnv.Generation, strictEnv.InvocationID, strictEnv.HostCallID
+		if len(strictEnv.HostResponse.ID) == 0 || bytes.Equal(strictEnv.HostResponse.ID, []byte("null")) || len(strictEnv.HostResponse.OK) == 0 || bytes.Equal(strictEnv.HostResponse.OK, []byte("null")) {
+			return nil, fmt.Errorf("decode host_response: missing required payload")
+		}
+		var id string
+		var ok bool
+		if json.Unmarshal(strictEnv.HostResponse.ID, &id) != nil || id == "" || json.Unmarshal(strictEnv.HostResponse.OK, &ok) != nil {
+			return nil, fmt.Errorf("decode host_response: invalid required payload")
+		}
+		if ok && (len(strictEnv.HostResponse.Result) == 0 || bytes.Equal(strictEnv.HostResponse.Result, []byte("null"))) {
+			return nil, fmt.Errorf("decode host_response: missing result")
+		}
+		if len(strictEnv.HostResponse.Result) > c.maxResponseBytes {
+			return nil, fmt.Errorf("decode host_response: result exceeds payload limit")
+		}
+		if !ok && (len(strictEnv.HostResponse.Error) == 0 || bytes.Equal(strictEnv.HostResponse.Error, []byte("null"))) {
+			return nil, fmt.Errorf("decode host_response: invalid failure")
+		}
+		if !ok && len(strictEnv.HostResponse.Result) > 0 {
+			return nil, fmt.Errorf("decode host_response: failure result")
+		}
+		if !ok {
+			var e string
+			if json.Unmarshal(strictEnv.HostResponse.Error, &e) != nil || strings.TrimSpace(e) == "" {
+				return nil, fmt.Errorf("decode host_response: invalid failure error")
+			}
+		}
+		if ok && len(strictEnv.HostResponse.Error) > 0 {
+			return nil, fmt.Errorf("decode host_response: success error")
+		}
+		var result json.RawMessage
+		if len(strictEnv.HostResponse.Result) > 0 {
+			result = strictEnv.HostResponse.Result
+		}
+		var errText string
+		if len(strictEnv.HostResponse.Error) > 0 && !bytes.Equal(strictEnv.HostResponse.Error, []byte("null")) {
+			if json.Unmarshal(strictEnv.HostResponse.Error, &errText) != nil {
+				return nil, fmt.Errorf("decode host_response: invalid error")
+			}
+		}
+		env.HostResponse = hostResponse{ID: id, OK: ok, Result: result, Error: errText}
+	} else if err := json.Unmarshal(scanned.raw, &env); err != nil {
 		return nil, fmt.Errorf("decode host_response: %w", err)
+	}
+	if len(env.HostResponse.Result) > c.maxResponseBytes {
+		return nil, fmt.Errorf("decode host_response: result exceeds payload limit")
+	}
+	if !validHostCallID(env.HostResponse.ID) || (env.HostResponse.HostCallID != "" && !validHostCallID(env.HostResponse.HostCallID)) {
+		return nil, fmt.Errorf("decode host_response: invalid host call id")
 	}
 	if env.HostResponse.ID != id {
 		return nil, fmt.Errorf("host_response id mismatch: got %q want %q", env.HostResponse.ID, id)
+	}
+	if env.HostResponse.HostCallID != "" && env.HostResponse.HostCallID != id {
+		return nil, fmt.Errorf("host_response host_call_id mismatch: got %q want %q", env.HostResponse.HostCallID, id)
+	}
+	if c.strict && (env.Protocol != 2 || env.Kind != "host_response" || env.HostCallID != id || env.Generation != c.generation || env.InvocationID != c.invocationID || !validInvocationID(env.InvocationID) || !validHostCallID(env.HostCallID)) {
+		return nil, fmt.Errorf("host_response correlation mismatch")
 	}
 	if !env.HostResponse.OK {
 		message := env.HostResponse.Error
@@ -132,25 +385,133 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 	return append(json.RawMessage(nil), env.HostResponse.Result...), nil
 }
 
+type strictHostCallEnvelope struct {
+	Protocol     uint64                `json:"protocol"`
+	Kind         string                `json:"kind"`
+	Generation   uint64                `json:"generation"`
+	InvocationID string                `json:"invocation_id"`
+	HostCallID   string                `json:"host_call_id"`
+	HostCall     strictHostCallPayload `json:"host_call"`
+}
+type strictHostCallPayload struct {
+	ID     string `json:"id"`
+	Method string `json:"method"`
+	Params any    `json:"params"`
+}
+
+func strictDecodeFrame(raw []byte, dst any) error {
+	if err := rejectDuplicateJSONKeys(raw); err != nil {
+		return err
+	}
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		return err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		return errors.New("trailing frame data")
+	}
+	return nil
+}
+
+func rejectDuplicateJSONKeys(raw []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	var walk func() error
+	walk = func() error {
+		t, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		switch d := t.(type) {
+		case json.Delim:
+			if d == '{' {
+				seen := map[string]bool{}
+				for dec.More() {
+					k, err := dec.Token()
+					if err != nil {
+						return err
+					}
+					key := k.(string)
+					if seen[key] {
+						return fmt.Errorf("duplicate JSON field %q", key)
+					}
+					seen[key] = true
+					if err := walk(); err != nil {
+						return err
+					}
+				}
+				_, err = dec.Token()
+				return err
+			}
+			if d == '[' {
+				for dec.More() {
+					if err := walk(); err != nil {
+						return err
+					}
+				}
+				_, err = dec.Token()
+				return err
+			}
+		}
+		return nil
+	}
+	if err := walk(); err != nil {
+		return err
+	}
+	return nil
+}
+
 type hostCallEnvelope struct {
-	HostCall hostCall `json:"host_call"`
+	Protocol     uint64   `json:"protocol,omitempty"`
+	Kind         string   `json:"kind,omitempty"`
+	Generation   uint64   `json:"generation,omitempty"`
+	InvocationID string   `json:"invocation_id,omitempty"`
+	HostCallID   string   `json:"host_call_id,omitempty"`
+	HostCall     hostCall `json:"host_call"`
 }
 
 type hostCall struct {
-	ID     string `json:"id"`
-	Method string `json:"method"`
-	Params any    `json:"params,omitempty"`
+	ID           string `json:"id"`
+	HostCallID   string `json:"host_call_id,omitempty"`
+	Generation   uint64 `json:"generation,omitempty"`
+	InvocationID string `json:"invocation_id,omitempty"`
+	Method       string `json:"method"`
+	Params       any    `json:"params,omitempty"`
 }
 
 type hostResponseEnvelope struct {
+	Protocol     uint64       `json:"protocol,omitempty"`
+	Kind         string       `json:"kind,omitempty"`
+	Generation   uint64       `json:"generation,omitempty"`
+	InvocationID string       `json:"invocation_id,omitempty"`
+	HostCallID   string       `json:"host_call_id,omitempty"`
 	HostResponse hostResponse `json:"host_response"`
 }
 
+type strictHostResponseEnvelope struct {
+	Protocol     uint64                    `json:"protocol"`
+	Kind         string                    `json:"kind"`
+	Generation   uint64                    `json:"generation"`
+	InvocationID string                    `json:"invocation_id"`
+	HostCallID   string                    `json:"host_call_id"`
+	HostResponse strictHostResponsePayload `json:"host_response"`
+}
+type strictHostResponsePayload struct {
+	ID     json.RawMessage `json:"id"`
+	OK     json.RawMessage `json:"ok"`
+	Result json.RawMessage `json:"result"`
+	Error  json.RawMessage `json:"error"`
+}
+
 type hostResponse struct {
-	ID     string          `json:"id"`
-	OK     bool            `json:"ok"`
-	Result json.RawMessage `json:"result,omitempty"`
-	Error  string          `json:"error,omitempty"`
+	ID           string          `json:"id"`
+	HostCallID   string          `json:"host_call_id,omitempty"`
+	Generation   uint64          `json:"generation,omitempty"`
+	InvocationID string          `json:"invocation_id,omitempty"`
+	OK           bool            `json:"ok"`
+	Result       json.RawMessage `json:"result,omitempty"`
+	Error        string          `json:"error,omitempty"`
 }
 
 type HTTPRequest struct {

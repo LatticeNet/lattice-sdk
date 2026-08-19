@@ -29,10 +29,19 @@ const (
 )
 
 type User struct {
-	ID                 string   `json:"id"`
-	Username           string   `json:"username"`
-	PasswordHash       string   `json:"password_hash"`
-	Scopes             []string `json:"scopes"`
+	ID           string   `json:"id"`
+	Username     string   `json:"username"`
+	PasswordHash string   `json:"password_hash"`
+	Scopes       []string `json:"scopes"`
+	// ServerAllowlist confines this operator to a set of nodes, exactly as the
+	// same field on Token confines an API caller. Empty means every node, which
+	// is what every existing account has and so preserves their access across
+	// the upgrade. "*" is accepted as an explicit spelling of the same thing.
+	//
+	// Without this a human account could only be narrowed by scope, never by
+	// node: the confinement machinery existed and was enforced everywhere, but
+	// only an API token could express it.
+	ServerAllowlist    []string `json:"server_allowlist,omitempty"`
 	TOTPEnabled        bool     `json:"totp_enabled"`
 	TOTPSecret         string   `json:"totp_secret,omitempty"`
 	RecoveryCodeHashes []string `json:"recovery_code_hashes,omitempty"`

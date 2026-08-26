@@ -143,6 +143,13 @@ type TraceAgentConfig struct {
 	Sessions []TraceAgentSession `json:"sessions,omitempty"`
 	// ServerTime lets the agent bound clock skew when enforcing TTLs.
 	ServerTime time.Time `json:"server_time,omitzero"`
+	// RawSourceID is the virtual log source that receives the node's ordinary
+	// sing-box lines, the ones no capture session asked for. They go to the
+	// existing bounded log store rather than the trace store, so the Logs view
+	// keeps working and there is parser evidence to look at after the fact
+	// instead of only assembled records. Empty means the server does not want
+	// raw lines from this node.
+	RawSourceID string `json:"raw_source_id,omitempty"`
 }
 
 // TraceAgentSession is one session as the agent sees it: the server has already

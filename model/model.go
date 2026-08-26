@@ -105,6 +105,12 @@ type Node struct {
 	HostFacts       HostFacts        `json:"host_facts"`
 	Geo             *NodeGeo         `json:"geo,omitempty"`
 	AgentDebug      AgentDebugPolicy `json:"agent_debug"`
+	// Trace is this node's sing-box trace collection policy. It sits beside
+	// AgentDebug rather than in its own map because it is node behaviour, not a
+	// separate resource: it is audited but never goes through the approval
+	// chain, since it changes what the agent subscribes to and never touches
+	// the node's own configuration.
+	Trace TracePolicy `json:"trace"`
 	// AgentLaunch is the last operator-authored installer/startup profile used
 	// to generate an enrollment or reconfigure command. It is advisory desired
 	// state, not proof of the currently running process flags.
@@ -902,6 +908,26 @@ type ProxyNodeProfile struct {
 
 	ConfigPath string `json:"config_path,omitempty"`
 	StatsAPI   string `json:"stats_api,omitempty"`
+
+	// LogLevel is the sing-box log.level rendered into this node's config. It
+	// governs only what lands on disk. The trace subscription level is separate
+	// and independent (model.TracePolicy): sing-box emits to Clash API
+	// subscribers without applying log.level, which is what lets verbosity
+	// change without a restart. Empty renders the default.
+	LogLevel string `json:"log_level,omitempty"`
+
+	// ClashAPI is the loopback address of this node's sing-box Clash API, for
+	// example "127.0.0.1:9090". Empty means the API is not rendered. It must be
+	// a loopback address: the renderer rejects anything else, because this
+	// endpoint exposes live connection data and log lines.
+	ClashAPI string `json:"clash_api,omitempty"`
+
+	// ClashAPISecret is the bearer token for ClashAPI. It is rendered into the
+	// node config, which already carries user UUIDs and REALITY private keys and
+	// is handled as a node-scoped secret-bearing artifact. The agent reads it
+	// back out of the applied config on the node; it is never shipped to the
+	// agent by any other path.
+	ClashAPISecret string `json:"clash_api_secret,omitempty"`
 
 	AppliedSHA256 string    `json:"applied_sha256,omitempty"`
 	LastApplyAt   time.Time `json:"last_apply_at,omitempty"`

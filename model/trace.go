@@ -201,6 +201,17 @@ const (
 	UserKindLegacy     = "legacy"     // a free-text operator label on a legacy ProxyUser
 	UserKindDiscovered = "discovered" // a third-party adopted node's named user
 	UserKindUnnamed    = "unnamed"    // sing-box logged an index, not a name
+	// UserKindUnobserved means the identity was never delivered for this
+	// connection, which is different from sing-box declining to name a user.
+	//
+	// The case that matters is multiplexing: a VLESS mux transport
+	// authenticates the user on the OUTER connection, and sing-box then mints a
+	// fresh log id for every inner stream. The inner streams begin at routing
+	// or outbound, so no user-bearing line ever carries their id, and the Clash
+	// API does not serialise the user either. The evidence does not exist under
+	// that id, so calling it unnamed would blame sing-box for something it was
+	// never asked. It also covers a collector that started mid-connection.
+	UserKindUnobserved = "unobserved"
 	UserKindUnresolved = "unresolved" // a name that no lookup could place, yet
 )
 

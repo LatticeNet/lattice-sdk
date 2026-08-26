@@ -79,6 +79,13 @@ type TracePolicy struct {
 	// secret itself never travels to the server and is never stored here.
 	SecretPath string    `json:"secret_path,omitempty"`
 	UpdatedAt  time.Time `json:"updated_at,omitzero"`
+
+	// LastCoreGeneration and LastCoreStartedAt are the newest sing-box process
+	// instance this node reported. A change is a restart, and recording it here
+	// means a restart on an idle node is still visible even though it swept no
+	// connections.
+	LastCoreGeneration uint64    `json:"last_core_generation,omitempty"`
+	LastCoreStartedAt  time.Time `json:"last_core_started_at,omitzero"`
 }
 
 // TraceFilter selects what a session captures. Empty fields mean "no constraint
@@ -359,8 +366,26 @@ type HopPath struct {
 }
 
 // ConnRecordKey identifies one ConnRecord.
+//
+// StartedAt is part of the identity, not decoration. sing-box's log id is
+// rand.Uint32, so one core generation on one node can reuse it; the assembler
+// deliberately splits those into two connections and the store's primary key
+// keeps both. A key without StartedAt collapses them again wherever it is used,
+// so a lookup returns whichever the query happened to order first and a hop
+// view can walk into the wrong connection entirely.
 type ConnRecordKey struct {
-	NodeID         string `json:"node_id"`
-	CoreGeneration uint64 `json:"core_generation"`
-	LogID          uint32 `json:"log_id"`
+	NodeID         string    `json:"node_id"`
+	CoreGeneration uint64    `json:"core_generation"`
+	LogID          uint32    `json:"log_id"`
+	StartedAt      time.Time `json:"started_at,omitzero"`
+}
+
+// KeyOf builds the full identity of a record.
+func KeyOf(r ConnRecord) ConnRecordKey {
+	return ConnRecordKey{
+		NodeID:         r.NodeID,
+		CoreGeneration: r.CoreGeneration,
+		LogID:          r.LogID,
+		StartedAt:      r.StartedAt,
+	}
 }

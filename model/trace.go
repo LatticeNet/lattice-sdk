@@ -305,6 +305,18 @@ type TraceBatch struct {
 	CapturedAt time.Time `json:"captured_at"`
 }
 
+// SourceLooksBare reports whether this value is the zero batch. The agent sends
+// {node_id, batch}; a client that posts a bare TraceBatch instead still
+// authenticates, because TraceBatch has its own NodeID, and then decodes into
+// an empty Batch that the server would accept with 200 OK and zero records.
+// Nothing would ever surface that. A batch that legitimately carries only
+// counters still sets CapturedAt, so this stays false for it.
+func (b TraceBatch) SourceLooksBare() bool {
+	return len(b.Records) == 0 && len(b.Lines) == 0 &&
+		b.CapturedAt.IsZero() && b.NodeID == "" &&
+		b.Dropped == 0 && b.Unparsed == 0 && b.CoreGeneration == 0
+}
+
 // TraceMarkerKind classifies the events drawn on the trace timeline. Each comes
 // from a signal Lattice already records; none is new instrumentation.
 const (

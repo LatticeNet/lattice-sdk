@@ -995,11 +995,11 @@ type SingBoxNode struct {
 	// It comes from a node-owned endpoints file rather than from the running
 	// config, because no amount of reading sing-box can reveal a mapping that
 	// lives in someone else's router.
-	PublicPort       string `json:"public_port,omitempty"`
-	OutboundRef      string `json:"outbound_ref,omitempty"`
-	OutboundServer   string `json:"outbound_server,omitempty"`
-	OutboundPort     string `json:"outbound_port,omitempty"`
-	OutboundType     string `json:"outbound_type,omitempty"`
+	PublicPort     string `json:"public_port,omitempty"`
+	OutboundRef    string `json:"outbound_ref,omitempty"`
+	OutboundServer string `json:"outbound_server,omitempty"`
+	OutboundPort   string `json:"outbound_port,omitempty"`
+	OutboundType   string `json:"outbound_type,omitempty"`
 	// DownstreamLineUUID is the declared chain edge target (design-15 §6), read
 	// from the sidecar chain block; empty when the line is single-exit or the
 	// edge is only inferable from outbound host/port.
@@ -1024,9 +1024,9 @@ type SingBoxInventory struct {
 	// Network is how this node is reached: nat | direct. Declared by the node
 	// itself, since whether a provider sits in front of it is not something the
 	// control plane can infer from the outside.
-	Network     string        `json:"network,omitempty"`
-	Status      string        `json:"status,omitempty"` // ok | error
-	Error       string        `json:"error,omitempty"`
+	Network string `json:"network,omitempty"`
+	Status  string `json:"status,omitempty"` // ok | error
+	Error   string `json:"error,omitempty"`
 }
 
 // NodeGeo is map metadata for a node. Operator-entered values are authoritative;

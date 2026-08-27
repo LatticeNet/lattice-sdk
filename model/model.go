@@ -987,6 +987,15 @@ type SingBoxNode struct {
 	SNI              string `json:"sni,omitempty"`
 	Host             string `json:"host,omitempty"`
 	ListenHost       string `json:"listen_host,omitempty"`
+	// PublicPort is the port the outside world reaches this inbound on, when it
+	// differs from the port sing-box listens on. A NAT node behind a provider
+	// edge is the case that needs it: the box listens on 488 while the world
+	// dials 50100. Empty means the listen port is also the public one.
+	//
+	// It comes from a node-owned endpoints file rather than from the running
+	// config, because no amount of reading sing-box can reveal a mapping that
+	// lives in someone else's router.
+	PublicPort       string `json:"public_port,omitempty"`
 	OutboundRef      string `json:"outbound_ref,omitempty"`
 	OutboundServer   string `json:"outbound_server,omitempty"`
 	OutboundPort     string `json:"outbound_port,omitempty"`
@@ -1012,6 +1021,10 @@ type SingBoxInventory struct {
 	At          time.Time     `json:"at"`
 	CoreVersion string        `json:"core_version,omitempty"`
 	Nodes       []SingBoxNode `json:"nodes"`
+	// Network is how this node is reached: nat | direct. Declared by the node
+	// itself, since whether a provider sits in front of it is not something the
+	// control plane can infer from the outside.
+	Network     string        `json:"network,omitempty"`
 	Status      string        `json:"status,omitempty"` // ok | error
 	Error       string        `json:"error,omitempty"`
 }

@@ -1315,6 +1315,12 @@ type DDNSProfile struct {
 	EnableIPv6 bool     `json:"enable_ipv6"`
 	MaxRetries int      `json:"max_retries"`
 	TTL        int      `json:"ttl"`
+	// IntervalSeconds is how long the server waits between attempts for this
+	// profile. A residential address wants minutes; a datacenter one that has
+	// held the same IP for a year does not, and the interval is also what
+	// spaces out retries when a provider is rejecting the write. Zero means the
+	// server default.
+	IntervalSeconds int `json:"interval_seconds,omitempty"`
 
 	// Cloudflare provider
 	CFAPIToken string `json:"cf_api_token,omitempty"`

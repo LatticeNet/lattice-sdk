@@ -1025,8 +1025,14 @@ type SingBoxInventory struct {
 	// itself, since whether a provider sits in front of it is not something the
 	// control plane can infer from the outside.
 	Network string `json:"network,omitempty"`
-	Status  string `json:"status,omitempty"` // ok | error
-	Error   string `json:"error,omitempty"`
+	// ProviderEdge is the hostname the outside world actually connects to when a
+	// provider forwards into this node. It is not the node's own public host: a
+	// relay elsewhere in the fleet points its outbound at the provider edge, so
+	// without it a chain into a NAT node cannot be matched back to the line it
+	// lands on. Declared by the node, for the same reason Network is.
+	ProviderEdge string `json:"provider_edge,omitempty"`
+	Status       string `json:"status,omitempty"` // ok | error
+	Error        string `json:"error,omitempty"`
 }
 
 // NodeGeo is map metadata for a node. Operator-entered values are authoritative;

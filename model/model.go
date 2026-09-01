@@ -1009,6 +1009,34 @@ type SingBoxNode struct {
 	Metadata           map[string]string `json:"metadata,omitempty"`
 	PublicKey          string            `json:"public_key,omitempty"`
 	ShareURL           string            `json:"share_url,omitempty"`
+	// PortBound reports whether a listener owned by the sing-box process is
+	// actually bound on this line's listen port (design-19). A pointer so an
+	// agent that did not probe decodes as unknown rather than as false: the
+	// difference between "not listening" and "nobody checked" is exactly the
+	// honesty this field exists to carry.
+	PortBound   *bool  `json:"port_bound,omitempty"`
+	PortBoundBy string `json:"port_bound_by,omitempty"`
+}
+
+// SingBoxRuntime is the service-liveness half of an inventory report
+// (design-19): what the agent observed about the sing-box process and unit,
+// as opposed to what the config files say. Collected read-only (trusted
+// /proc scan plus systemctl show); a probe failure is reported in ProbeError
+// rather than silently dropped, because "could not check" must never render
+// as "running".
+type SingBoxRuntime struct {
+	Running bool `json:"running"`
+	PID     int  `json:"pid,omitempty"`
+	// StartedAt is best-effort (proc entry age); zero when unknown.
+	StartedAt   time.Time `json:"started_at,omitempty"`
+	ActiveState string    `json:"active_state,omitempty"`
+	SubState    string    `json:"sub_state,omitempty"`
+	// RestartCount is systemd NRestarts. A counter that rises between two
+	// probes exposes a crash loop even when every probe lands while the
+	// process happens to be alive.
+	RestartCount int       `json:"restart_count,omitempty"`
+	ProbedAt     time.Time `json:"probed_at,omitempty"`
+	ProbeError   string    `json:"probe_error,omitempty"`
 }
 
 // SingBoxInventory is the latest snapshot of the sing-box nodes discovered on one
@@ -1017,10 +1045,13 @@ type SingBoxNode struct {
 // not persisted (a restart simply waits for the next report). Status/Error let a
 // node report a discovery failure (e.g. sb not installed) without a stale list.
 type SingBoxInventory struct {
-	NodeID      string        `json:"node_id"`
-	At          time.Time     `json:"at"`
-	CoreVersion string        `json:"core_version,omitempty"`
-	Nodes       []SingBoxNode `json:"nodes"`
+	NodeID string `json:"node_id"`
+	// Runtime carries the service-liveness probe (design-19). Nil means the
+	// reporting agent predates the probe or has it disabled: unknown, not ok.
+	Runtime     *SingBoxRuntime `json:"runtime,omitempty"`
+	At          time.Time       `json:"at"`
+	CoreVersion string          `json:"core_version,omitempty"`
+	Nodes       []SingBoxNode   `json:"nodes"`
 	// Network is how this node is reached: nat | direct. Declared by the node
 	// itself, since whether a provider sits in front of it is not something the
 	// control plane can infer from the outside.

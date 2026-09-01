@@ -1097,8 +1097,13 @@ type NodeInventory struct {
 }
 
 type Task struct {
-	ID            string               `json:"id"`
-	ApprovalID    string               `json:"approval_id,omitempty"`
+	ID         string `json:"id"`
+	ApprovalID string `json:"approval_id,omitempty"`
+	// Capability is the admission scope this task was confined to at creation
+	// (design 2026-08-31). It is persisted so the confinement survives the
+	// task itself: a rerun must re-answer "may this still touch that node"
+	// with the same capability the original was gated by, not with none.
+	Capability    string               `json:"capability,omitempty"`
 	ActorID       string               `json:"actor_id"`
 	TokenID       string               `json:"token_id"`
 	Targets       []string             `json:"targets"`

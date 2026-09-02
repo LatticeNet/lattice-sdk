@@ -1053,9 +1053,15 @@ type SingBoxRuntime struct {
 	Running bool `json:"running"`
 	PID     int  `json:"pid,omitempty"`
 	// StartedAt is best-effort (proc entry age); zero when unknown.
-	StartedAt   time.Time `json:"started_at,omitempty"`
-	ActiveState string    `json:"active_state,omitempty"`
-	SubState    string    `json:"sub_state,omitempty"`
+	StartedAt time.Time `json:"started_at,omitempty"`
+	// ExeSHA256 is the hex sha256 of the executable the trusted process runs,
+	// read through /proc/<pid>/exe so it hashes the inode the kernel loaded
+	// rather than whatever the path holds now. It lets the control plane
+	// compare a node against release digests; empty when no trusted process
+	// runs or the reporting agent predates the field.
+	ExeSHA256   string `json:"exe_sha256,omitempty"`
+	ActiveState string `json:"active_state,omitempty"`
+	SubState    string `json:"sub_state,omitempty"`
 	// RestartCount is systemd NRestarts. A counter that rises between two
 	// probes exposes a crash loop even when every probe lands while the
 	// process happens to be alive.

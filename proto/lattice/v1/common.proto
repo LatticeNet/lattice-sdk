@@ -261,6 +261,16 @@ message GuardInterface {
   bool up = 3;
 }
 
+message GuardSSHDFacts {
+  bool password_authentication = 1;
+  bool pubkey_authentication = 2;
+  string permit_root_login = 3;
+  uint32 max_auth_tries = 4;
+  repeated uint32 ports = 5;
+  repeated string listen_addresses = 6;
+  TimePoint observed_at = 7;
+}
+
 message GuardNodeReality {
   string node_id = 1;
   repeated GuardListener listeners = 2;
@@ -269,6 +279,8 @@ message GuardNodeReality {
   repeated string foreign_tables = 5;
   string nft_version = 6;
   TimePoint collected_at = 7;
+  GuardSSHDFacts sshd = 8;
+  string sshd_note = 9;
 }
 
 message WGNetwork {

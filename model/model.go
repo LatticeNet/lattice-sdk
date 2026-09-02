@@ -985,6 +985,21 @@ type ProxyUsageSnapshot struct {
 	// and servers may derive user_bytes by summing per-user line counters.
 	LineUserBytes map[string]map[string]int64 `json:"line_user_bytes,omitempty"`
 
+	// InboundTraffic, UserTraffic and OutboundTraffic carry the cumulative
+	// counters with the uplink/downlink split kept, keyed by the core's own
+	// inbound tag, credential name (u_<hash> for Lattice-issued users) and
+	// outbound tag. They are additive to UserBytes, which stays the per-user
+	// sum of both directions so old servers keep working. Inbound counters
+	// are the only usage signal for legacy inbounds whose users carry no
+	// name; outbound counters feed the server's chain analysis.
+	InboundTraffic  map[string]ProxyTrafficCounter `json:"inbound_traffic,omitempty"`
+	UserTraffic     map[string]ProxyTrafficCounter `json:"user_traffic,omitempty"`
+	OutboundTraffic map[string]ProxyTrafficCounter `json:"outbound_traffic,omitempty"`
+	// IgnoredCounters counts the traffic map entries the agent dropped to stay
+	// under its per-map cap, so a truncated snapshot is visible rather than
+	// silently short.
+	IgnoredCounters int `json:"ignored_counters,omitempty"`
+
 	// Collector fields describe this collection attempt. They let the agent
 	// report local collector errors without overwriting the previous accounting
 	// baseline on the server.
@@ -992,6 +1007,15 @@ type ProxyUsageSnapshot struct {
 	CollectorStatus    string    `json:"collector_status,omitempty"` // ok | error
 	CollectorError     string    `json:"collector_error,omitempty"`
 	CollectorCheckedAt time.Time `json:"collector_checked_at,omitempty"`
+}
+
+// ProxyTrafficCounter is one cumulative traffic counter pair as the core
+// reports it: bytes received from the client side (uplink) and bytes sent
+// back (downlink). Both are monotonic until the core restarts; the server
+// owns the diffing.
+type ProxyTrafficCounter struct {
+	Uplink   int64 `json:"uplink"`
+	Downlink int64 `json:"downlink"`
 }
 
 // SingBoxNode is one inbound discovered on a node by reading its on-box sing-box

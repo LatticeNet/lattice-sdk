@@ -91,7 +91,18 @@ type Node struct {
 	InternalIPv6 string `json:"internal_ipv6,omitempty"`
 	AgentVersion string `json:"agent_version"`
 	Online       bool   `json:"online"`
-	Disabled     bool   `json:"disabled,omitempty"`
+	// OnlineSince is when the current run of Online began. The heartbeat path
+	// sets it on the beat that turns Online from false to true and leaves it
+	// alone on every later beat, so the control plane can say how long a node
+	// has been reporting rather than only that it is. Zero for records written
+	// before the field existed and for nodes that have never reported; the
+	// server omits a zero value from the wire rather than sending year 0001.
+	OnlineSince time.Time `json:"online_since,omitzero"`
+	Disabled    bool      `json:"disabled,omitempty"`
+	// DisabledAt is when an operator disabled the node, zero while it is
+	// enabled. It gives the disabled state a "since", the way LastSeen does for
+	// offline and CreatedAt does for never reported.
+	DisabledAt time.Time `json:"disabled_at,omitzero"`
 	// AgentSourceAllowlist optionally restricts node-agent bearer-token use to
 	// exact source IPs or CIDR prefixes as resolved by the server's client-IP
 	// trust policy. Empty means no source-address restriction.

@@ -715,6 +715,27 @@ type GuardInterface struct {
 	Up        bool     `json:"up,omitempty"`
 }
 
+// GuardSSHDFacts is the effective sshd configuration as `sshd -T` prints it,
+// reported next to the listeners so SSH Guard can print password and port
+// posture from evidence. The agent reads it only when it runs as root and
+// sshd resolves in a trusted executable directory; anything else leaves the
+// field nil with the reason in GuardNodeReality.SSHDNote, never a guess.
+type GuardSSHDFacts struct {
+	PasswordAuthentication bool `json:"password_authentication"`
+	PubkeyAuthentication   bool `json:"pubkey_authentication"`
+	// PermitRootLogin is the literal value sshd prints: yes, no,
+	// prohibit-password, or forced-commands-only.
+	PermitRootLogin string `json:"permit_root_login"`
+	MaxAuthTries    int    `json:"max_auth_tries,omitempty"`
+	// Ports is every `port` line, sorted and deduplicated. sshd always prints
+	// at least one, so an empty list means the parse did not prove a port.
+	Ports []int `json:"ports"`
+	// ListenAddresses is every `listenaddress` line as printed (host:port),
+	// including the wildcard entries sshd fills in when none is configured.
+	ListenAddresses []string  `json:"listen_addresses,omitempty"`
+	ObservedAt      time.Time `json:"observed_at"`
+}
+
 // GuardNodeReality is the agent-reported ground truth for reality-first
 // authoring and drift detection (design-13 §4.3). It is low-trust input: it
 // feeds suggestions, diffs, and display only — never silent policy.
@@ -725,7 +746,11 @@ type GuardNodeReality struct {
 	ManagedSHA    string           `json:"managed_sha,omitempty"`
 	ForeignTables []string         `json:"foreign_tables,omitempty"`
 	NFTVersion    string           `json:"nft_version,omitempty"`
-	CollectedAt   time.Time        `json:"collected_at"`
+	// SSHD carries the sshd facts, or nil when the agent could not prove them
+	// (or predates the field). SSHDNote says why when a current agent refused.
+	SSHD        *GuardSSHDFacts `json:"sshd,omitempty"`
+	SSHDNote    string          `json:"sshd_note,omitempty"`
+	CollectedAt time.Time       `json:"collected_at"`
 }
 
 const (

@@ -252,9 +252,22 @@ func TestProtoContractsExistAndStayRedacted(t *testing.T) {
 		"string managed_sha = 4;",
 		"repeated string foreign_tables = 5;",
 		"TimePoint collected_at = 7;",
+		"GuardSSHDFacts sshd = 8;",
+		"string sshd_note = 9;",
 	} {
 		if !strings.Contains(guardReality, field) {
 			t.Fatalf("GuardNodeReality missing field %s", field)
+		}
+	}
+	guardSSHD := messageBody(t, string(common), "GuardSSHDFacts")
+	for _, field := range []string{
+		"bool password_authentication = 1;",
+		"string permit_root_login = 3;",
+		"repeated uint32 ports = 5;",
+		"TimePoint observed_at = 7;",
+	} {
+		if !strings.Contains(guardSSHD, field) {
+			t.Fatalf("GuardSSHDFacts missing field %s", field)
 		}
 	}
 	wgNetwork := messageBody(t, string(common), "WGNetwork")

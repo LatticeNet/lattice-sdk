@@ -378,6 +378,9 @@ type NFTInputs struct {
 
 const (
 	DNSEngineCoreDNS = "coredns"
+	// DNSEngineExternal marks a resolver Lattice observes and never deploys:
+	// the operator runs it, Lattice records where it listens and watches it.
+	DNSEngineExternal = "external"
 
 	DNSExposureMesh   = "mesh"
 	DNSExposurePublic = "public"
@@ -391,6 +394,8 @@ const (
 	DNSStatusRunning  = "running"
 	DNSStatusFailed   = "failed"
 	DNSStatusDisabled = "disabled"
+	// DNSStatusObserved is the only status an external engine ever holds.
+	DNSStatusObserved = "observed"
 )
 
 // DNSZone is one served block in a self-hosted resolver configuration. It is
@@ -410,14 +415,36 @@ type DNSRecord struct {
 	TTL   int    `json:"ttl,omitempty"`
 }
 
+// DNSListener is one socket an external DNS engine is recorded to own on its
+// node. Protocol and port are the operator's claim; Process is what the node's
+// guard reality reported at the time the claim was recorded (empty when the
+// listener was not observed then).
+type DNSListener struct {
+	Protocol string `json:"protocol"` // tcp | udp
+	Port     int    `json:"port"`
+	Process  string `json:"process,omitempty"`
+}
+
 // DNSDeployment is the control-plane intent for a self-hosted DNS service on a
 // node. CFAPIToken is a server-side secret and must never appear in read views
 // or agent payloads.
+//
+// With Engine external the record is an observation, not an intent: Listeners
+// and CertNotAfter are filled, Zones may be empty, and nothing is ever
+// rendered, applied or published for it.
 type DNSDeployment struct {
 	ID     string `json:"id"`
 	Name   string `json:"name"`
 	NodeID string `json:"node_id"`
 	Engine string `json:"engine"`
+
+	// Listeners is the socket set an external engine owns on the node,
+	// compared with guard reality on every read. Empty for engines Lattice
+	// deploys itself, which derive their listener from ListenPort.
+	Listeners []DNSListener `json:"listeners,omitempty"`
+	// CertNotAfter is the operator-entered expiry of the external engine's
+	// TLS certificate (DoT/DoH). Zero when unknown or not applicable.
+	CertNotAfter time.Time `json:"cert_not_after,omitempty"`
 
 	ListenPort int    `json:"listen_port"`
 	EnableUDP  bool   `json:"enable_udp"`
@@ -1465,6 +1492,10 @@ const (
 	MonitorTypeTCP  = "tcp"
 	MonitorTypeHTTP = "http"
 	MonitorTypeICMP = "icmp"
+	// MonitorTypeTLS is evaluated by the server itself, not by agents: it
+	// dials Target (host:port), reads the leaf certificate and fails when the
+	// handshake fails or the certificate expires within ThresholdDays.
+	MonitorTypeTLS = "tls"
 )
 
 // Monitor is a periodic reachability/latency probe executed by assigned agents.
@@ -1472,20 +1503,24 @@ const (
 // runs on every node when AssignAll is set, otherwise on the nodes in NodeIDs —
 // this is how a group's members continuously measure their group leader.
 type Monitor struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Type        string    `json:"type"`
-	Target      string    `json:"target"`
-	IntervalSec int       `json:"interval_sec"`
-	TimeoutSec  int       `json:"timeout_sec"`
-	AssignAll   bool      `json:"assign_all"`
-	NodeIDs     []string  `json:"node_ids,omitempty"`
-	Enabled     bool      `json:"enabled"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	Target      string   `json:"target"`
+	IntervalSec int      `json:"interval_sec"`
+	TimeoutSec  int      `json:"timeout_sec"`
+	AssignAll   bool     `json:"assign_all"`
+	NodeIDs     []string `json:"node_ids,omitempty"`
+	// ThresholdDays applies to tls monitors only: the probe fails when the
+	// leaf certificate's not-after is closer than this many days.
+	ThresholdDays int       `json:"threshold_days,omitempty"`
+	Enabled       bool      `json:"enabled"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-// MonitorResult is a single probe outcome reported by an agent.
+// MonitorResult is a single probe outcome. Agents report them for tcp and http
+// monitors; the server records its own for tls monitors, with NodeID empty.
 type MonitorResult struct {
 	MonitorID string    `json:"monitor_id"`
 	NodeID    string    `json:"node_id"`
@@ -1493,6 +1528,9 @@ type MonitorResult struct {
 	Success   bool      `json:"success"`
 	LatencyMs float64   `json:"latency_ms"`
 	Error     string    `json:"error,omitempty"`
+	// CertNotAfter is the leaf certificate expiry a tls probe read, set
+	// whenever the handshake completed, whether or not the probe passed.
+	CertNotAfter time.Time `json:"cert_not_after,omitempty"`
 }
 
 // LogSource declares a file on a node whose appended lines are tailed by the

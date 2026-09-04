@@ -157,6 +157,22 @@ message DNSZone {
   repeated DNSRecord records = 4;
 }
 
+// DNSListener is one socket an external DNS engine is recorded to own.
+message DNSListener {
+  string protocol = 1;
+  uint32 port = 2;
+  string process = 3;
+}
+
+// DNSDrift is the read-time comparison of an external engine's recorded
+// listener set with the node's guard reality. Findings are sentences; the
+// server never acts on them.
+message DNSDrift {
+  string status = 1; // ok | drift | unknown
+  repeated string findings = 2;
+  TimePoint reality_collected_at = 3;
+}
+
 message DNSDeploymentView {
   string id = 1;
   string name = 2;
@@ -185,6 +201,9 @@ message DNSDeploymentView {
   TimePoint updated_at = 25;
   TimePoint last_published_at = 26;
   string last_publish_error = 27;
+  repeated DNSListener listeners = 28;
+  TimePoint cert_not_after = 29;
+  DNSDrift drift = 30;
 }
 
 message NetEndpoint {

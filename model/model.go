@@ -1581,10 +1581,16 @@ type Monitor struct {
 	NodeIDs     []string `json:"node_ids,omitempty"`
 	// ThresholdDays applies to tls monitors only: the probe fails when the
 	// leaf certificate's not-after is closer than this many days.
-	ThresholdDays int       `json:"threshold_days,omitempty"`
-	Enabled       bool      `json:"enabled"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ThresholdDays int  `json:"threshold_days,omitempty"`
+	Enabled       bool `json:"enabled"`
+	// ManagedBy names the control-plane feature that generated this monitor
+	// (MonitorManagedLatency), and is empty for a monitor an operator
+	// created. The owner rewrites a managed monitor whenever its own
+	// configuration or the fleet changes, so it is edited through that
+	// configuration and never deleted on its own. Agents ignore the field.
+	ManagedBy string    `json:"managed_by,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // MonitorResult is a single probe outcome. Agents report them for tcp and http

@@ -115,8 +115,10 @@ const (
 	// it had. A node that went dark is exactly what the probe must keep
 	// measuring.
 	LatencyEndpointLastKnown = "last_known"
-	// LatencyEndpointNoAddress: no public IPv4 address, provider edge or
-	// published host to dial.
+	// LatencyEndpointNoAddress: neither the node's own public IPv4 nor a
+	// provider edge that is a public address or a name resolving only to
+	// public addresses. A host name or address a line publishes is never
+	// dialled.
 	LatencyEndpointNoAddress = "no_public_address"
 	// LatencyEndpointUDPOnly: every line is UDP (hysteria2, tuic, QUIC
 	// transport), which a TCP connect cannot measure.
@@ -163,9 +165,11 @@ type LatencyProbeNode struct {
 	// Target is a LatencyTarget* state and TargetReason a LatencyReason*.
 	Target       string `json:"target"`
 	TargetReason string `json:"target_reason,omitempty"`
-	// Endpoint is host:port as the sources dial it, with the line it came
-	// from. EndpointNote is a LatencyEndpoint* code: why there is no
-	// endpoint, or that it is the last known one.
+	// Endpoint is address:port as the sources dial it, with the line it came
+	// from. The address is always an IPv4 literal: a provider edge name
+	// appears as the address the control plane resolved it to. EndpointNote
+	// is a LatencyEndpoint* code: why there is no endpoint, or that it is
+	// the last known one.
 	Endpoint     string `json:"endpoint,omitempty"`
 	Protocol     string `json:"protocol,omitempty"`
 	LineName     string `json:"line_name,omitempty"`

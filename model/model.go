@@ -284,6 +284,74 @@ type Metrics struct {
 	CollectedAt   time.Time `json:"collected_at"`
 }
 
+// Work loop steps an agent names in AgentHealth.Step and AgentHealth.Steps.
+// The agent owns the list; a consumer must accept a name it does not know.
+const (
+	AgentStepLinechainRecovery = "linechain_recovery"
+	AgentStepHello             = "hello"
+	AgentStepConfig            = "config"
+	AgentStepIPRefresh         = "ip_refresh"
+	AgentStepUsage             = "usage"
+	AgentStepInventory         = "inventory"
+	AgentStepTasks             = "tasks"
+	AgentStepMonitors          = "monitors"
+	AgentStepLogSources        = "log_sources"
+	AgentStepTrace             = "trace"
+	AgentStepDebug             = "debug"
+	AgentStepGuardReality      = "guard_reality"
+)
+
+// AgentHealth is the agent's own account of whether its loops are moving. It
+// rides on every metrics beat as "loop_health" (node-agent 0.3.10 and later);
+// the heartbeat runs on its own goroutine, so a node can beat while its work
+// loop is stuck, and this is how the control plane tells the two apart.
+//
+// Every instant is the agent's clock. A consumer compares them with each
+// other or with Metrics.CollectedAt from the same beat, never with its own
+// clock, so a skewed node still reads correctly. The payload is low-trust
+// telemetry from the node: useful for status and alerts, never for
+// authorization.
+type AgentHealth struct {
+	// StartedAt is when this agent process started.
+	StartedAt time.Time `json:"started_at"`
+	// CycleStartedAt and CycleCompletedAt bound the most recent work loop
+	// cycle; CycleCompletedAt is the last cycle that ran every step, whatever
+	// each step's outcome. Zero until the first cycle.
+	CycleStartedAt   time.Time `json:"cycle_started_at,omitzero"`
+	CycleCompletedAt time.Time `json:"cycle_completed_at,omitzero"`
+	CycleDurationMs  int64     `json:"cycle_duration_ms,omitempty"`
+	// Step is the step running now and StepSince when it started; empty while
+	// the loop waits for its next tick.
+	Step      string    `json:"step,omitempty"`
+	StepSince time.Time `json:"step_since,omitzero"`
+	// LinechainBlocked is why durable task recovery refuses to proceed, one
+	// bounded line; empty when it is not blocked. While it is set the agent
+	// skips the rest of every cycle and withholds its durable task capability.
+	LinechainBlocked      string    `json:"linechain_blocked,omitempty"`
+	LinechainBlockedSince time.Time `json:"linechain_blocked_since,omitzero"`
+	// Steps is the outcome of each step the loop has run, by step name.
+	Steps map[string]AgentLoopStep `json:"steps,omitempty"`
+	// TaskBusySince is when the task worker took the task it runs now.
+	TaskBusySince time.Time `json:"task_busy_since,omitzero"`
+	// MonitorResultsQueued waits to be sent; MonitorResultsDropped counts,
+	// since the process started, results the server never stored (queue
+	// overflow, a refusal, or a send that gave up).
+	MonitorResultsQueued  int    `json:"monitor_results_queued,omitempty"`
+	MonitorResultsDropped uint64 `json:"monitor_results_dropped,omitempty"`
+	// Watchdog is set when the agent armed the systemd watchdog.
+	Watchdog bool `json:"watchdog,omitempty"`
+}
+
+// AgentLoopStep is the outcome history of one work loop step. LastError is a
+// single bounded line the agent composed; it carries request paths and server
+// diagnostics, never the node token.
+type AgentLoopStep struct {
+	LastOKAt          time.Time `json:"last_ok_at,omitzero"`
+	LastErrorAt       time.Time `json:"last_error_at,omitzero"`
+	LastError         string    `json:"last_error,omitempty"`
+	ConsecutiveErrors int       `json:"consecutive_errors,omitempty"`
+}
+
 // HostFacts are auto-detected, slow-changing machine facts reported by the
 // node-agent. They are advisory low-trust telemetry: useful for display,
 // inventory and map planning, but never for authorization decisions.

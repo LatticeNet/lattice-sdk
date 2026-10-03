@@ -48,6 +48,32 @@ message ReportMetricsRequest {
   Metrics metrics = 2;
   AgentNetworkReport network = 3;
   HostFacts host_facts = 4;
+  AgentHealth loop_health = 5;
+}
+
+// AgentHealth is the agent's own account of its loops (model.AgentHealth).
+// Every instant is the agent's clock.
+message AgentHealth {
+  TimePoint started_at = 1;
+  TimePoint cycle_started_at = 2;
+  TimePoint cycle_completed_at = 3;
+  int64 cycle_duration_ms = 4;
+  string step = 5;
+  TimePoint step_since = 6;
+  string linechain_blocked = 7;
+  TimePoint linechain_blocked_since = 8;
+  map<string, AgentLoopStep> steps = 9;
+  TimePoint task_busy_since = 10;
+  int32 monitor_results_queued = 11;
+  uint64 monitor_results_dropped = 12;
+  bool watchdog = 13;
+}
+
+message AgentLoopStep {
+  TimePoint last_ok_at = 1;
+  TimePoint last_error_at = 2;
+  string last_error = 3;
+  int32 consecutive_errors = 4;
 }
 
 message LeaseTasksRequest {

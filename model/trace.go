@@ -1,6 +1,10 @@
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+	"unicode/utf8"
+)
 
 // sing-box trace: the shared contract between agent, server, and dashboard.
 //
@@ -77,8 +81,16 @@ type TracePolicy struct {
 	ClashAPIAddr string `json:"clash_api_addr,omitempty"`
 	// SecretPath is where the agent reads the Clash API secret on the node. The
 	// secret itself never travels to the server and is never stored here.
-	SecretPath string    `json:"secret_path,omitempty"`
-	UpdatedAt  time.Time `json:"updated_at,omitzero"`
+	SecretPath string `json:"secret_path,omitempty"`
+	// Raw switches raw lines separately from records. nil is a policy
+	// written before the switch existed: raw lines then follow Enabled,
+	// which is what every server up to alpha-0.2.2a117 did. A server that
+	// knows this field stores it non-nil on every write.
+	//
+	// It is a pointer, so a copy of a policy shares it. Replace it with a new
+	// value rather than writing through it.
+	Raw       *RawLinePolicy `json:"raw,omitempty"`
+	UpdatedAt time.Time      `json:"updated_at,omitzero"`
 
 	// LastCoreGeneration and LastCoreStartedAt are the newest sing-box process
 	// instance this node reported. A change is a restart, and recording it here
@@ -86,6 +98,125 @@ type TracePolicy struct {
 	// connections.
 	LastCoreGeneration uint64    `json:"last_core_generation,omitempty"`
 	LastCoreStartedAt  time.Time `json:"last_core_started_at,omitzero"`
+}
+
+// RawLinePolicy switches a node's raw sing-box lines (the singbox://<node>
+// log source) separately from its connection records. R2 adds the level and
+// the TTL; both are additive.
+type RawLinePolicy struct {
+	Enabled bool `json:"enabled"`
+}
+
+// RawLinesEnabled reports whether raw lines flow under this policy. Raw lines
+// are a sub-switch of records: the agent's raw path is fed by the lines the
+// node floor keeps, and the floor keeps nothing while records are off.
+func (p TracePolicy) RawLinesEnabled() bool {
+	if !p.Enabled {
+		return false
+	}
+	return p.Raw == nil || p.Raw.Enabled
+}
+
+// CollectorState is the readiness of a node's sing-box trace collector.
+type CollectorState string
+
+const (
+	CollectorOff              CollectorState = "off"               // no policy and no capture wants it
+	CollectorReady            CollectorState = "ready"             // the /logs stream is open and /connections answers
+	CollectorNoClashAPI       CollectorState = "no_clash_api"      // no loopback Clash API address in the policy or the sing-box config
+	CollectorSecretUnreadable CollectorState = "secret_unreadable" // an address exists, the bearer secret cannot be read
+	CollectorStreamFailing    CollectorState = "stream_failing"    // the API refuses or drops /logs or /connections past the grace
+	// CollectorAgentTooOld is inferred by the server from the agent version.
+	// An agent never sends it, and a server ignores it from one.
+	CollectorAgentTooOld CollectorState = "agent_too_old"
+)
+
+// ValidAgentCollectorState reports whether an agent may send s. It is false
+// for CollectorAgentTooOld, which only the server infers, and for any state
+// this contract does not name.
+func ValidAgentCollectorState(s CollectorState) bool {
+	switch s {
+	case CollectorOff, CollectorReady, CollectorNoClashAPI, CollectorSecretUnreadable, CollectorStreamFailing:
+		return true
+	}
+	return false
+}
+
+// Where the collector's Clash API address came from.
+const (
+	ClashAddrFromPolicy = "policy" // TracePolicy.ClashAPIAddr
+	ClashAddrFromConfig = "config" // experimental.clash_api.external_controller in the node's sing-box config
+)
+
+// CollectorDetailMaxBytes bounds CollectorStatus.Detail. The agent bounds it
+// before sending and the server again on receipt, both with
+// BoundCollectorDetail.
+const CollectorDetailMaxBytes = 256
+
+// BoundCollectorDetail makes s one line of at most CollectorDetailMaxBytes
+// bytes: line breaks become spaces, and a cut never splits a UTF-8 sequence.
+func BoundCollectorDetail(s string) string {
+	s = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ").Replace(s)
+	if len(s) <= CollectorDetailMaxBytes {
+		return s
+	}
+	cut := CollectorDetailMaxBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
+}
+
+// CollectorStatus is the agent's account of its trace collector. It rides the
+// metrics beat as "trace_collector" (node-agent 0.3.10-alpha.4 and later).
+// Every instant is the agent's clock; a consumer compares them with each
+// other or with the beat's metrics.collected_at, never with its own clock.
+// Low-trust telemetry: for display, never for authorization.
+type CollectorStatus struct {
+	State CollectorState `json:"state"`
+	// Since is when State last changed.
+	Since time.Time `json:"since,omitzero"`
+	// Level is what the open /logs subscription delivers. Empty unless ready.
+	Level TraceLevel `json:"level,omitempty"`
+	// ClashAPIAddr is the loopback address in use or attempted, and
+	// AddrSource is ClashAddrFromPolicy or ClashAddrFromConfig. Both are
+	// empty when no address was found.
+	ClashAPIAddr string `json:"clash_api_addr,omitempty"`
+	AddrSource   string `json:"addr_source,omitempty"`
+	// Detail is one line of at most CollectorDetailMaxBytes saying why the
+	// state is not ready. It never carries the secret.
+	Detail string `json:"detail,omitempty"`
+	// RawLines is whether the collector is shipping raw lines right now.
+	RawLines bool `json:"raw_lines,omitempty"`
+	// LinesPerSec is parsed lines per second over the last full 10 s window,
+	// and BudgetLinesPerSec the parsed-line ceiling in force.
+	LinesPerSec       float64 `json:"lines_per_sec,omitempty"`
+	BudgetLinesPerSec int     `json:"budget_lines_per_sec,omitempty"`
+	// ShedConnections and Unparsed are cumulative since CountersSince (the
+	// start of the agent process). ShedConnections counts connections the
+	// budget refused to observe; none of them produced a record.
+	ShedConnections uint64    `json:"shed_connections,omitempty"`
+	Unparsed        uint64    `json:"unparsed,omitempty"`
+	CountersSince   time.Time `json:"counters_since,omitzero"`
+}
+
+// EvidenceSettings are the local evidence budgets on the control plane.
+// R1 defaults are today's values; R2 changes the defaults and adds fields.
+//
+// Durations are whole seconds rather than time.Duration, which would marshal
+// as integer nanoseconds; every other client-facing duration in this API is
+// seconds.
+type EvidenceSettings struct {
+	TraceDBMaxBytes    int64 `json:"trace_db_max_bytes"`    // trace.db cap; default 2 GiB
+	RecordTTLSeconds   int64 `json:"record_ttl_seconds"`    // conn_records; default 14 d
+	LineTTLSeconds     int64 `json:"line_ttl_seconds"`      // capture lines; default 7 d
+	Rollup5mTTLSeconds int64 `json:"rollup_5m_ttl_seconds"` // rollups_5m; default 90 d
+	RawSourceMaxBytes  int64 `json:"raw_source_max_bytes"`  // logs.db per source; default 64 MiB or LATTICE_LOG_MAX_SOURCE_BYTES
+	// Version counts saves; a save names the version it was made from, so two
+	// administrators editing at once cannot overwrite each other.
+	Version   int64     `json:"version"`
+	UpdatedAt time.Time `json:"updated_at,omitzero"`
+	UpdatedBy string    `json:"updated_by,omitempty"`
 }
 
 // TraceFilter selects what a session captures. Empty fields mean "no constraint
@@ -323,6 +454,10 @@ type TraceBatch struct {
 	CoreStartedAt  time.Time `json:"core_started_at,omitzero"`
 	// Dropped counts what the agent discarded under budget since the last batch.
 	Dropped uint64 `json:"dropped,omitempty"`
+	// ShedConnections counts connections the agent's line budget refused to
+	// observe since the last batch. They are also counted in Dropped, so a
+	// server that predates this field still records the gap.
+	ShedConnections uint64 `json:"shed_connections,omitempty"`
 	// Unparsed counts lines the parser could not read. A rising number means
 	// sing-box changed its format, which is the failure mode most likely to be
 	// mistaken for "nothing is happening".
@@ -339,7 +474,8 @@ type TraceBatch struct {
 func (b TraceBatch) SourceLooksBare() bool {
 	return len(b.Records) == 0 && len(b.Lines) == 0 &&
 		b.CapturedAt.IsZero() && b.NodeID == "" &&
-		b.Dropped == 0 && b.Unparsed == 0 && b.CoreGeneration == 0
+		b.Dropped == 0 && b.Unparsed == 0 && b.CoreGeneration == 0 &&
+		b.ShedConnections == 0
 }
 
 // TraceMarkerKind classifies the events drawn on the trace timeline. Each comes

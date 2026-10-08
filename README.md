@@ -17,11 +17,14 @@ github.com/LatticeNet/lattice-sdk
 - `model` - users, tokens, nodes, metrics, HostFacts, MachineProfile inventory
   metadata, NFTInputs, NetPolicy/NodeGeo intent state, proxy-core
   inbound/user/node-profile/usage intent state, approval-linked tasks, task
-  results, audit events, KV entries, static objects, Worker scripts, and
-  approvals.
+  results, audit events, KV entries, static objects, Worker scripts,
+  approvals, and the native Sub-Store contract of design 28: subscription
+  shares and snapshots, the line catalogue (rows, selectors, pages), selection
+  plans with their placeholders, and the fetch, render and convert wire types.
 - `plugin` - system-plugin stdio-json-v1 helpers: request/response framing,
-  fd-3 host-call client helpers, manifest/capability structs, and signed
-  per-method invoke budget types.
+  fd-3 host-call client helpers, manifest/capability structs, signed
+  per-method invoke budget types (including the per-method HTTP response
+  budget), and task schedules.
 
 ## Proto Contracts
 

@@ -22,8 +22,30 @@ const (
 	MaxSubscriptionSourceVisits        = 10_000
 	MaxSubscriptionURIBytes            = 4 << 10
 	MaxSubscriptionSourceManifestBytes = 1 << 20
-	MaxSubscriptionRawBytes            = 1 << 20
-	MaxSubscriptionResponseBytes       = 4 << 20
+	// MaxSubscriptionRawBytes bounds the provider content one snapshot keeps.
+	// It was 1 MiB until design 28 raised it to the response bound, because a
+	// 4096-node record with Reality and transport options measures 3 to 4 MB.
+	MaxSubscriptionRawBytes      = 4 << 20
+	MaxSubscriptionResponseBytes = 4 << 20
+	// MaxSubscriptionRequestBytes bounds one request the core sends to a
+	// subscription plugin method: render carries a snapshot's raw content and
+	// convert carries a bound node list. Until design 28 those requests were
+	// bounded by MaxSubscriptionResponseBytes (4 MiB); a request check should
+	// use this constant instead, so a raw body at its own bound still fits
+	// with the request around it.
+	MaxSubscriptionRequestBytes = 8 << 20
+	// MaxSubscriptionSnapshotBytes bounds one encoded SubscriptionSnapshot,
+	// about 9.1 MiB. Render hands Raw to the plugin JSON-encoded inside a
+	// request of at most MaxSubscriptionRequestBytes, so the bound is that
+	// request bound, plus the source manifest at its own bound, plus room
+	// for the remaining fields: every snapshot whose Raw a render request can
+	// carry fits. A Raw whose JSON escaping takes it past that (encoding/json
+	// writes "<", "&" or a control byte as six bytes, so 4 MiB of them
+	// encodes to 24 MiB) is refused when the store encodes the record,
+	// because no render could carry it. Ordinary subscription text escapes to
+	// well under twice its size. At rest the store seals Raw into unescaped
+	// base64, about 5.4 MiB at the raw bound, which fits.
+	MaxSubscriptionSnapshotBytes = MaxSubscriptionRequestBytes + MaxSubscriptionSourceManifestBytes + 64<<10
 )
 
 type SubscriptionSourceManifestV1 struct {

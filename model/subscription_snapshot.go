@@ -55,7 +55,10 @@ type SubscriptionSnapshot struct {
 // durable store remains responsible for staging and atomically rewriting v1
 // records after every record has decrypted and validated.
 func (s *SubscriptionSnapshot) UnmarshalJSON(raw []byte) error {
-	if len(raw) == 0 || len(raw) > MaxSubscriptionResponseBytes {
+	// The document bound is MaxSubscriptionSnapshotBytes, not the response
+	// bound: a Raw at MaxSubscriptionRawBytes, escaped or sealed, is larger
+	// than the response bound once it sits inside the record.
+	if len(raw) == 0 || len(raw) > MaxSubscriptionSnapshotBytes {
 		return fmt.Errorf("invalid subscription snapshot size")
 	}
 	if err := rejectDuplicateJSONFields(raw); err != nil {

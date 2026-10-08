@@ -26,6 +26,35 @@ type ShareSource struct {
 	PluginID       string `json:"plugin_id,omitempty"`
 	SubscriptionID string `json:"subscription_id,omitempty"`
 	ProxyUserID    string `json:"proxy_user_id,omitempty"`
+	// IdentityID names the identity a plugin share serves when its record is
+	// fleet-bound (design 28): the record selects lines and names nobody, and
+	// the core binds this identity's credentials into the plugin's plan before
+	// convert produces the document. Empty for every other share. It belongs
+	// to the plugin kind only.
+	//
+	// ShareSource keeps no unknown fields, so a server built before this
+	// field drops it when it rewrites the share.
+	IdentityID string `json:"identity_id,omitempty"`
+}
+
+// Values of ShareIcon.Fit.
+const (
+	// ShareIconFitContain scales the whole image inside the icon box.
+	ShareIconFitContain = "contain"
+	// ShareIconFitCover fills the icon box and crops what overflows.
+	ShareIconFitCover = "cover"
+)
+
+// ShareIcon is how the console draws a share: an image, an optional tint and
+// how the image fits its box. The core stores it and never fetches URL.
+type ShareIcon struct {
+	// URL is the image the console shows for the share.
+	URL string `json:"url"`
+	// Color tints a monochrome image, as a CSS hex colour such as "#3b82f6".
+	// Empty keeps the image's own colours.
+	Color string `json:"color,omitempty"`
+	// Fit is ShareIconFitContain or ShareIconFitCover. Empty means contain.
+	Fit string `json:"fit,omitempty"`
 }
 
 // SubscriptionShare is one publicly reachable subscription URL. Token is the only
@@ -44,6 +73,23 @@ type SubscriptionShare struct {
 	RotatedAt     *time.Time  `json:"rotated_at,omitempty"`
 	ExpiresAt     *time.Time  `json:"expires_at,omitempty"`
 
+	// DisplayName is the operator's name for the share. Unlike Slug it never
+	// reaches a URL.
+	DisplayName string `json:"display_name,omitempty"`
+	// Remark is the operator's free-form note on the share.
+	Remark string `json:"remark,omitempty"`
+	// Icon is how the console draws the share. Nil draws the default.
+	Icon *ShareIcon `json:"icon,omitempty"`
+	// Tags group and filter shares in the console.
+	Tags []string `json:"tags,omitempty"`
+	// Order is the share's position in the operator's manual order. Shares
+	// with equal Order sort by CreatedAt.
+	Order int `json:"order,omitempty"`
+	// ArchivedAt is when the share moved to the recycle bin. An archived
+	// share is not served; restoring it clears ArchivedAt and keeps the same
+	// token, and purging deletes the share.
+	ArchivedAt *time.Time `json:"archived_at,omitempty"`
+
 	// Extra holds fields written by a newer schema version. It exists so a
 	// rollback cannot silently delete data this version cannot interpret.
 	Extra map[string]json.RawMessage `json:"-"`
@@ -56,6 +102,7 @@ var subscriptionShareKnownFields = []string{
 	"id", "schema_version", "slug", "token", "source",
 	"default_format", "enabled", "created_at", "updated_at",
 	"rotated_at", "expires_at",
+	"display_name", "remark", "icon", "tags", "order", "archived_at",
 }
 
 type subscriptionShareAlias SubscriptionShare

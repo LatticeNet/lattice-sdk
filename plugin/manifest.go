@@ -55,6 +55,10 @@ const (
 	CapabilityTunnelAdmin        = "tunnel:admin"
 	CapabilityWorkerRoute        = "worker:route"
 	CapabilityDDNSAdmin          = "ddns:admin"
+
+	// CapabilityTaskSchedule admits task.schedule and task.unschedule, which
+	// call the plugin's own methods on a cron schedule (TaskSchedule).
+	CapabilityTaskSchedule = "task:schedule"
 )
 
 type Manifest struct {

@@ -161,7 +161,7 @@ func TestSubscriptionSnapshotRejectsRawAndResponseBounds(t *testing.T) {
 	}
 	for name, raw := range map[string][]byte{
 		"raw":      mustMarshalSnapshot(t, SubscriptionSnapshot{SchemaVersion: 2, PluginID: "p", SubscriptionID: "s", Raw: strings.Repeat("r", MaxSubscriptionRawBytes+1), SourceVersion: version, SourceManifest: manifest}),
-		"response": append([]byte(`{"schema_version":2,"plugin_id":"p","subscription_id":"s","raw":"`), bytes.Repeat([]byte{'r'}, MaxSubscriptionResponseBytes)...),
+		"document": append([]byte(`{"schema_version":2,"plugin_id":"p","subscription_id":"s","raw":"`), bytes.Repeat([]byte{'r'}, MaxSubscriptionSnapshotBytes)...),
 	} {
 		t.Run(name, func(t *testing.T) {
 			var got SubscriptionSnapshot
@@ -180,6 +180,54 @@ func TestSubscriptionSnapshotAllowsPersistedEnvelopeExpansionForStoreValidation(
 	var got SubscriptionSnapshot
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("persisted envelope expansion rejected before store decryption: %v", err)
+	}
+}
+
+// The raw bound rose from 1 MiB to 4 MiB in design 28. A Raw at the bound
+// must survive the store's encode and decode round trip in its worst JSON
+// escaping, which is what MaxSubscriptionSnapshotBytes is derived from; one
+// byte more is refused.
+func TestSubscriptionSnapshotRawBoundSurvivesWorstCaseEscaping(t *testing.T) {
+	t.Parallel()
+	if MaxSubscriptionRawBytes != 4<<20 {
+		t.Fatalf("MaxSubscriptionRawBytes = %d, want 4 MiB", MaxSubscriptionRawBytes)
+	}
+	raw := mustMarshalSnapshot(t, SubscriptionSnapshot{SchemaVersion: 2, PluginID: "p", SubscriptionID: "s", Raw: strings.Repeat("<", MaxSubscriptionRawBytes)})
+	if len(raw) <= 6*MaxSubscriptionRawBytes || len(raw) > MaxSubscriptionSnapshotBytes {
+		t.Fatalf("worst-case snapshot encodes to %d bytes, outside (%d, %d]", len(raw), 6*MaxSubscriptionRawBytes, MaxSubscriptionSnapshotBytes)
+	}
+	var got SubscriptionSnapshot
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("raw at the bound refused: %v", err)
+	}
+	if len(got.Raw) != MaxSubscriptionRawBytes {
+		t.Fatalf("raw decoded to %d bytes", len(got.Raw))
+	}
+	over := mustMarshalSnapshot(t, SubscriptionSnapshot{SchemaVersion: 2, PluginID: "p", SubscriptionID: "s", Raw: strings.Repeat("r", MaxSubscriptionRawBytes+1)})
+	if err := json.Unmarshal(over, &got); err == nil {
+		t.Fatal("raw one byte over the bound accepted")
+	}
+}
+
+// A sealed Raw is exempt from the raw bound, so the document bound is what
+// stops it: a document of exactly MaxSubscriptionSnapshotBytes decodes and
+// one byte more does not.
+func TestSubscriptionSnapshotDocumentBoundAtTheEdge(t *testing.T) {
+	t.Parallel()
+	sealed := func(n int) []byte {
+		return mustMarshalSnapshot(t, SubscriptionSnapshot{SchemaVersion: 2, PluginID: "p", SubscriptionID: "s", Raw: "lat$" + strings.Repeat("A", n)})
+	}
+	overhead := len(sealed(0))
+	atBound := sealed(MaxSubscriptionSnapshotBytes - overhead)
+	if len(atBound) != MaxSubscriptionSnapshotBytes {
+		t.Fatalf("fixture is %d bytes, want %d", len(atBound), MaxSubscriptionSnapshotBytes)
+	}
+	var got SubscriptionSnapshot
+	if err := json.Unmarshal(atBound, &got); err != nil {
+		t.Fatalf("snapshot at the document bound refused: %v", err)
+	}
+	if err := json.Unmarshal(sealed(MaxSubscriptionSnapshotBytes-overhead+1), &got); err == nil {
+		t.Fatal("snapshot one byte over the document bound accepted")
 	}
 }
 

@@ -1526,6 +1526,14 @@ const (
 	DDNSCommentNone    = "none"
 )
 
+// DDNSProfile.RecordType values. An empty type is the address type, so a
+// profile saved before record types existed keeps publishing A and AAAA
+// records from its node's IP.
+const (
+	DDNSRecordAddress = "address"
+	DDNSRecordCNAME   = "cname"
+)
+
 // DDNSProfile describes how a node's public IP should be published to DNS. It is
 // bound to a node; when that node's observed public IP changes, the bound
 // profiles' records are updated.
@@ -1545,6 +1553,15 @@ type DDNSProfile struct {
 	// spaces out retries when a provider is rejecting the write. Zero means the
 	// server default.
 	IntervalSeconds int `json:"interval_seconds,omitempty"`
+	// RecordType decides what each domain becomes. "" and "address" publish
+	// A and AAAA records from the node's IP. "cname" publishes a CNAME to
+	// CNAMETarget instead, for a node whose inbound traffic arrives through a
+	// provider's hostname rather than at the address its traffic leaves from;
+	// EnableIPv4 and EnableIPv6 do not apply to it.
+	RecordType string `json:"record_type,omitempty"`
+	// CNAMETarget is the hostname a "cname" profile's records point to,
+	// stored without a trailing dot.
+	CNAMETarget string `json:"cname_target,omitempty"`
 
 	// Cloudflare provider
 	CFAPIToken string `json:"cf_api_token,omitempty"`
@@ -1571,6 +1588,11 @@ type DDNSProfile struct {
 	LastError string    `json:"last_error,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+
+	// LastTarget is the CNAME target a "cname" profile last confirmed in DNS,
+	// set by the server like the other status fields. It differs from
+	// CNAMETarget until a run after the target was edited.
+	LastTarget string `json:"last_target,omitempty"`
 }
 
 const (

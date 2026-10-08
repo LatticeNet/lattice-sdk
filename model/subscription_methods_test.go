@@ -80,7 +80,9 @@ func TestSubscriptionWebPageURLChecks(t *testing.T) {
 		return prefix + strings.Repeat("p", n-len(prefix))
 	}
 	accepted := []string{
-		"https://provider.example/account?tab=usage", "https://203.0.113.30/", "https://[2001:db8::1]:8443/", long(MaxSubscriptionResponseHeaderBytes),
+		"https://provider.example/account?tab=usage", "https://1.1.1.1/", "https://[2606:4700:4700::1111]:8443/", long(MaxSubscriptionResponseHeaderBytes),
+		// Just outside the benchmarking range and the two NAT64 prefixes.
+		"https://198.20.0.1/", "https://[64:ff9b::1:0:0]/", "https://[64:ff9b:2::1]/",
 	}
 	refused := []string{
 		"http://provider.example/", "https://user:pw@provider.example/", "https://user@provider.example/", "javascript:alert(1)",
@@ -89,7 +91,14 @@ func TestSubscriptionWebPageURLChecks(t *testing.T) {
 		"https://0.0.0.0/", "https://[::ffff:10.0.0.1]/", "https://[fd00::1]/", "https://224.0.0.1/",
 		"https://localhost/", "https://router.local/", "https://db.internal/", "https://intranet/", "https://a.localhost/",
 		"https://127.1/", "https://10.1.1/", "https://0x7f.1/", "https://0x7f000001/", "https://017700000001.1/",
-		"https://[64:ff9b::a00:1]/", "https://[64:ff9b:1::a00:1]/",
+		// NAT64: low and high embedded addresses in the /96, both ends of the /48.
+		"https://[64:ff9b::a00:1]/", "https://[64:ff9b::c0a8:101]/", "https://[64:ff9b::ffff:ffff]/",
+		"https://[64:ff9b:1::a00:1]/", "https://[64:ff9b:1:ffff:ffff:ffff:ffff:ffff]/",
+		// Documentation and benchmarking ranges, as the core's outbound guard refuses them.
+		"https://192.0.2.1/", "https://198.51.100.7/", "https://203.0.113.30/", "https://198.18.0.1/", "https://198.19.255.255/",
+		"https://[2001:db8::1]:8443/",
+		// A zone, even on a public address.
+		"https://[2606:4700:4700::1111%25eth0]/",
 		"https://provider.example/ a", "https://provider.example/\r\nX: y", long(MaxSubscriptionResponseHeaderBytes + 1),
 	}
 	for _, value := range accepted {
@@ -101,6 +110,17 @@ func TestSubscriptionWebPageURLChecks(t *testing.T) {
 		if err := ValidateSubscriptionWebPageURL(value); err == nil {
 			t.Fatalf("%q accepted", value)
 		}
+	}
+	// A trailing dot is refused for being one, not because the empty last
+	// label happens to look numeric, and it cannot carry a local name past
+	// the suffix checks.
+	for _, value := range []string{"https://provider.example./", "https://localhost./", "https://router.local./"} {
+		if err := ValidateSubscriptionWebPageURL(value); err == nil || !strings.Contains(err.Error(), "ends in a dot") {
+			t.Fatalf("%q: err = %v, want a trailing-dot refusal", value, err)
+		}
+	}
+	if err := ValidateSubscriptionWebPageURL("https://[2606:4700:4700::1111%25eth0]/"); err == nil || !strings.Contains(err.Error(), "zone") {
+		t.Fatalf("zoned address: err = %v, want a zone refusal", err)
 	}
 }
 
@@ -163,6 +183,10 @@ func TestConvertRequestInputs(t *testing.T) {
 		{"raw", ConvertRequest{Raw: "x", Target: "URI"}, true},
 		{"nodes", ConvertRequest{Nodes: []json.RawMessage{node}, Target: "sing-box"}, true},
 		{"document without target", ConvertRequest{Document: &ConvertDocument{Content: "uuid: " + p, Substitutions: map[string]string{p: "real"}}}, true},
+		{"uris without target", ConvertRequest{URIs: []string{"vless://a"}}, false},
+		{"raw without target", ConvertRequest{Raw: "x"}, false},
+		{"nodes without target", ConvertRequest{Nodes: []json.RawMessage{node}}, false},
+		{"blank target", ConvertRequest{URIs: []string{"vless://a"}, Target: " "}, false},
 		{"no input", ConvertRequest{Target: "URI"}, false},
 		{"two inputs", ConvertRequest{URIs: []string{"vless://a"}, Nodes: []json.RawMessage{node}, Target: "URI"}, false},
 		{"node not an object", ConvertRequest{Nodes: []json.RawMessage{json.RawMessage(`"vless://a"`)}, Target: "URI"}, false},

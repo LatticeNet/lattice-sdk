@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -19,11 +20,19 @@ import (
 // vpncore:read: one LineCatalogueRow per line, cursor-paginated, filtered by
 // an optional LineCatalogueSelector before paging.
 //
-// Credential-free is the contract. Every template a row carries has passed
-// the core's fragment-survival refusal (no part of the line owner's
-// credential four bytes or longer survives in it), and Validate refuses the
-// parameters a client entry takes from an identity's credential, so a
-// consumer that validates never holds a credential it did not ask for.
+// Credential-free is the contract, and the core is what keeps it: every
+// template a row carries has passed the core's fragment-survival refusal (no
+// part of the line owner's credential four bytes or longer survives in it).
+// That check needs the credential, so only the core can run it.
+//
+// Validate is a consumer's structural second line, and it is narrower. A
+// template param must be one of the connection parameters the core's builder
+// keeps (the allowlist below); the parameters a client entry takes from an
+// identity's credential are refused by name. No param value and no string
+// anywhere in Extra may look like a sealed secret, a private key or a URL,
+// and no Extra key at any depth may be a credential name. Extra is bounded.
+// A credential the core let through under an allowlisted name in a shape
+// none of these patterns catches would still pass Validate.
 
 // Chain roles (LineCatalogueChain.Role).
 const (
@@ -63,9 +72,20 @@ const (
 	// hold (design 28). It bounds an explicit line list in a selector, the
 	// nodes of a selection plan and the nodes of a convert request.
 	MaxSubscriptionRecordNodes = 4096
-	// MaxLineCataloguePageRows bounds one catalogue page. A full page stays
-	// inside the 4 MiB host-call result a plugin can receive.
+	// MaxLineCataloguePageRows bounds the rows of one catalogue page.
 	MaxLineCataloguePageRows = 1000
+	// MaxLineCataloguePageBytes bounds one encoded catalogue page. It sits
+	// 64 KiB inside the 4 MiB host-call result a plugin receives
+	// (plugin.DefaultMaxHostResponsePayloadBytes), which leaves room for any
+	// envelope around the page. A core cuts a page at MaxLineCataloguePageRows
+	// rows or at this many bytes, whichever comes first.
+	MaxLineCataloguePageBytes = 4<<20 - 64<<10
+	// MaxLineCatalogueRowBytes bounds one encoded row, so every page can hold
+	// at least one row and a read always makes progress.
+	MaxLineCatalogueRowBytes = 64 << 10
+	// MaxLineCatalogueExtraBytes bounds a row's Extra: the sum of its keys'
+	// lengths and its values' encoded lengths.
+	MaxLineCatalogueExtraBytes = 4 << 10
 	// MaxLineCatalogueSelectorValues bounds each value list in a selector
 	// other than LineUUIDs.
 	MaxLineCatalogueSelectorValues = 256
@@ -95,6 +115,23 @@ const (
 var LineTemplateReservedParams = map[string]bool{
 	"id": true, "add": true, "port": true, "ps": true, "v": true, "flow": true,
 }
+
+// lineTemplateParams are the only params a catalogue template may carry: the
+// connection parameters the core's template builder keeps from a share URI
+// (lineClientURIParams in lattice-server) and from a vmess document
+// (lineClientVMessFields). The builder drops every other parameter, so a
+// template with another key did not come from it. A parameter the core
+// starts to keep is added here in the same change.
+var lineTemplateParams = map[string]bool{
+	"aid": true, "allowInsecure": true, "alpn": true, "congestion_control": true, "encryption": true,
+	"fp": true, "headerType": true, "host": true, "insecure": true, "mode": true, "net": true,
+	"path": true, "pbk": true, "pinSHA256": true, "security": true, "serviceName": true,
+	"sid": true, "sni": true, "spx": true, "tls": true, "type": true,
+}
+
+// lineCatalogueExtraKey is the shape of a key in a row's Extra: a lowercase
+// snake_case name, like every other catalogue field.
+var lineCatalogueExtraKey = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
 // LineCatalogueRow is one line as the catalogue serves it: what the line is,
 // where it runs, what is known about its health, and the credential-free
@@ -167,7 +204,9 @@ type LineCatalogueRow struct {
 	// line.
 	Template *LineCatalogueTemplate `json:"template,omitempty"`
 	// Extra carries fields added after this version, so a new field needs no
-	// new capability wave.
+	// new capability wave. Keys are lowercase snake_case names, the whole map
+	// is at most MaxLineCatalogueExtraBytes, and no key at any depth is a
+	// credential name.
 	Extra map[string]json.RawMessage `json:"extra,omitempty"`
 }
 
@@ -308,7 +347,8 @@ type LineCatalogueRequest struct {
 	// Cursor is the Cursor of the previous page, empty for the first page.
 	Cursor string `json:"cursor,omitempty"`
 	// Limit is the page size; zero asks for the core's default. At most
-	// MaxLineCataloguePageRows.
+	// MaxLineCataloguePageRows. A page may hold fewer rows, when it reaches
+	// MaxLineCataloguePageBytes first; only an empty Cursor ends a read.
 	Limit int `json:"limit,omitempty"`
 }
 
@@ -328,9 +368,31 @@ type LineCatalogueResponse struct {
 	SelectorFields []string `json:"selector_fields,omitempty"`
 }
 
-// Validate checks a row's shape: its identity, its enums, its addresses and
-// that its template carries no reserved or sealed parameter.
+// Validate checks a row's shape: its identity, its enums, its addresses, that
+// its template keeps only known connection parameters, that its Extra is
+// bounded and credential-free in shape, and that it encodes to at most
+// MaxLineCatalogueRowBytes.
 func (r LineCatalogueRow) Validate() error {
+	_, err := r.validate()
+	return err
+}
+
+// validate is Validate, and it also returns the row's encoded length.
+func (r LineCatalogueRow) validate() (int, error) {
+	if err := r.validateFields(); err != nil {
+		return 0, err
+	}
+	raw, err := json.Marshal(r)
+	if err != nil {
+		return 0, fmt.Errorf("line catalogue row %s: %w", r.LineUUID, err)
+	}
+	if len(raw) > MaxLineCatalogueRowBytes {
+		return 0, fmt.Errorf("line catalogue row %s encodes to %d bytes, over %d", r.LineUUID, len(raw), MaxLineCatalogueRowBytes)
+	}
+	return len(raw), nil
+}
+
+func (r LineCatalogueRow) validateFields() error {
 	if !subscriptionSourceUUIDv4.MatchString(r.LineUUID) {
 		return errors.New("line catalogue row: line_uuid must be a lowercase uuidv4")
 	}
@@ -390,7 +452,94 @@ func (r LineCatalogueRow) Validate() error {
 			return fmt.Errorf("line catalogue row %s: %w", r.LineUUID, err)
 		}
 	}
+	if err := validateLineCatalogueExtra(r.Extra); err != nil {
+		return fmt.Errorf("line catalogue row %s: %w", r.LineUUID, err)
+	}
 	return nil
+}
+
+// validateLineCatalogueExtra bounds a row's Extra and screens it the way a
+// template's params are screened: every key is a lowercase field name, no
+// key at any depth is a credential name, and no string at any depth looks
+// like a sealed secret, a private key or a URL.
+func validateLineCatalogueExtra(extra map[string]json.RawMessage) error {
+	total := 0
+	for key, value := range extra {
+		if !lineCatalogueExtraKey.MatchString(key) {
+			return fmt.Errorf("extra key %q is not a lowercase field name", key)
+		}
+		total += len(key) + len(value)
+		if total > MaxLineCatalogueExtraBytes {
+			return fmt.Errorf("extra exceeds %d bytes", MaxLineCatalogueExtraBytes)
+		}
+		// A duplicate key would hide its first value from the screen below
+		// while the raw bytes, which the row re-emits, still carry it.
+		if err := rejectDuplicateJSONFields(value); err != nil {
+			return fmt.Errorf("extra %q: %w", key, err)
+		}
+		var decoded any
+		if err := json.Unmarshal(value, &decoded); err != nil {
+			return fmt.Errorf("extra %q is not valid JSON", key)
+		}
+		if err := screenCatalogueValue(key, decoded); err != nil {
+			return fmt.Errorf("extra %q: %w", key, err)
+		}
+	}
+	return nil
+}
+
+// screenCatalogueValue walks one decoded JSON value under name and refuses a
+// credential name or a sensitive-looking string anywhere in it.
+func screenCatalogueValue(name string, value any) error {
+	if credentialName(name) {
+		return fmt.Errorf("%q is a credential name", name)
+	}
+	switch v := value.(type) {
+	case string:
+		if sensitiveCatalogueText(v) {
+			return fmt.Errorf("%q carries sensitive text", name)
+		}
+	case []any:
+		for _, item := range v {
+			if err := screenCatalogueValue(name, item); err != nil {
+				return err
+			}
+		}
+	case map[string]any:
+		for key, item := range v {
+			if err := screenCatalogueValue(key, item); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// credentialName reports whether a field name is one a proxy protocol keeps
+// a credential under: the vless, vmess and tuic uuid (id in a vmess
+// document), the passwords of trojan, hysteria2, tuic, anytls, shadowsocks
+// and socks, the socks username, hysteria's auth string, WireGuard's private
+// and pre-shared keys, obfuscation passwords, and anything named a secret or
+// a token. Case, hyphens and underscores are ignored, so private-key,
+// private_key and privateKey are one name.
+func credentialName(name string) bool {
+	folded := strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(name))
+	switch folded {
+	case "id", "uuid", "auth", "authstr", "psk", "username", "pass":
+		return true
+	}
+	for _, stem := range []string{"password", "passwd", "secret", "token", "privatekey", "presharedkey", "credential"} {
+		if strings.Contains(folded, stem) {
+			return true
+		}
+	}
+	return false
+}
+
+// sensitiveCatalogueText reports whether a value looks like a sealed secret,
+// a private key or a URL, none of which a credential-free row carries.
+func sensitiveCatalogueText(value string) bool {
+	return strings.Contains(value, "://") || strings.Contains(strings.ToUpper(value), "PRIVATE KEY") || strings.HasPrefix(value, "lat$")
 }
 
 // Validate checks a chain block.
@@ -425,9 +574,10 @@ func (p LineCatalogueProbe) Validate() error {
 	return nil
 }
 
-// Validate checks a template the way the core's template store does, and
-// refuses a reserved parameter or a value that looks like a sealed secret,
-// a private key or a URL.
+// Validate checks a template the way the core's template store does, refuses
+// a reserved parameter and any parameter the core's builder does not keep,
+// and refuses a value that looks like a sealed secret, a private key or a
+// URL.
 func (t LineCatalogueTemplate) Validate() error {
 	switch {
 	case !validCatalogueID(t.Protocol):
@@ -450,7 +600,10 @@ func (t LineCatalogueTemplate) Validate() error {
 		if LineTemplateReservedParams[key] {
 			return fmt.Errorf("template carries the reserved param %q", key)
 		}
-		if strings.Contains(value, "://") || strings.Contains(strings.ToUpper(value), "PRIVATE KEY") || strings.HasPrefix(value, "lat$") {
+		if !lineTemplateParams[key] {
+			return fmt.Errorf("template param %q is not a connection parameter the core keeps", key)
+		}
+		if sensitiveCatalogueText(value) {
 			return fmt.Errorf("template param %q carries sensitive text", key)
 		}
 	}
@@ -593,8 +746,9 @@ func DecodeLineCatalogueRequest(raw []byte) (LineCatalogueRequest, error) {
 	return req, nil
 }
 
-// Validate checks a catalogue page: its version and cursor, its size, every
-// row, and that no line appears twice.
+// Validate checks a catalogue page: its version and cursor, its row count,
+// every row, that no line appears twice, and that the page encodes to at
+// most MaxLineCataloguePageBytes.
 func (r LineCatalogueResponse) Validate() error {
 	if !validCatalogueToken(r.CatalogueVersion) {
 		return errors.New("catalogue page needs a catalogue_version")
@@ -605,20 +759,39 @@ func (r LineCatalogueResponse) Validate() error {
 	if len(r.Rows) > MaxLineCataloguePageRows {
 		return fmt.Errorf("catalogue page has more than %d rows", MaxLineCataloguePageRows)
 	}
+	for _, name := range r.SelectorFields {
+		if !validCatalogueID(name) {
+			return errors.New("catalogue page advertises an invalid selector field")
+		}
+	}
 	seen := make(map[string]struct{}, len(r.Rows))
+	rowBytes := 0
 	for _, row := range r.Rows {
-		if err := row.Validate(); err != nil {
+		size, err := row.validate()
+		if err != nil {
 			return err
 		}
 		if _, dup := seen[row.LineUUID]; dup {
 			return fmt.Errorf("catalogue page lists line %s twice", row.LineUUID)
 		}
 		seen[row.LineUUID] = struct{}{}
+		rowBytes += size
 	}
-	for _, name := range r.SelectorFields {
-		if !validCatalogueID(name) {
-			return errors.New("catalogue page advertises an invalid selector field")
-		}
+	// The page encodes as its envelope with an empty rows array, plus each
+	// row's own encoding and a comma between rows; encoding/json writes a
+	// slice element exactly as it writes the value alone. Summing the rows
+	// already encoded avoids encoding the whole page a second time.
+	envelope := r
+	if len(r.Rows) > 0 {
+		envelope.Rows = []LineCatalogueRow{}
+	}
+	head, err := json.Marshal(envelope)
+	if err != nil {
+		return err
+	}
+	size := len(head) + rowBytes + max(len(r.Rows)-1, 0)
+	if size > MaxLineCataloguePageBytes {
+		return fmt.Errorf("catalogue page encodes to %d bytes, over %d", size, MaxLineCataloguePageBytes)
 	}
 	return nil
 }

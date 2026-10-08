@@ -141,8 +141,17 @@ type ConvertRequest struct {
 }
 
 // ConvertDocument is a document plan's produced text and, for each
-// placeholder in it, the credential the core bound. Convert replaces the
-// placeholders textually and calls nothing.
+// placeholder in it, the credential the core bound. Convert puts each
+// credential where its placeholder is and calls nothing.
+//
+// Validate keeps every credential to one bounded line, so a credential cannot
+// add a line to the document. It does not make a credential safe inside a
+// quoted scalar: a password holding a quote or a backslash, pasted in byte
+// for byte, ends a YAML or JSON string early. Identity passwords come from
+// the core's credential store and may hold any printable character, so
+// convert must write each credential encoded for the scalar its placeholder
+// sits in. A plain textual replacement is correct only where every character
+// of the credential is literal.
 type ConvertDocument struct {
 	// Content is the document plan's text, placeholders included.
 	Content string `json:"content"`
@@ -238,8 +247,9 @@ func (r RenderReply) Validate() error {
 	return nil
 }
 
-// Validate checks that exactly one input is set and that the new inputs and
-// the response chain are inside their bounds.
+// Validate checks that exactly one input is set, that every input but a
+// document names a target, and that the new inputs and the response chain
+// are inside their bounds.
 func (r ConvertRequest) Validate() error {
 	inputs := 0
 	for _, set := range []bool{len(r.URIs) > 0, r.Raw != "", len(r.Nodes) > 0, r.Document != nil} {
@@ -249,6 +259,9 @@ func (r ConvertRequest) Validate() error {
 	}
 	if inputs != 1 {
 		return errors.New("convert needs exactly one of uris, raw, nodes and document")
+	}
+	if r.Document == nil && !validCatalogueID(r.Target) {
+		return errors.New("convert of uris, raw or nodes needs a target")
 	}
 	if len(r.Nodes) > MaxSubscriptionRecordNodes {
 		return fmt.Errorf("convert carries more than %d nodes", MaxSubscriptionRecordNodes)
@@ -393,37 +406,54 @@ func ValidateSubscriptionResponseHeader(name, value string) error {
 // ValidateSubscriptionWebPageURL checks a provider web page URL before a
 // client is told to open it: https, no userinfo, at most
 // MaxSubscriptionResponseHeaderBytes, and a host that is neither a
-// non-public address literal nor a local name. A name is not resolved here;
-// the core resolves it and applies its egress address policy.
+// non-public address literal, an address with an IPv6 zone, a name ending in
+// a dot, nor a local name. A name is not resolved here; the core resolves it
+// and applies its egress address policy.
 func ValidateSubscriptionWebPageURL(value string) error {
+	return validatePublicHTTPSURL("web page url", value)
+}
+
+// validatePublicHTTPSURL is the rule ValidateSubscriptionWebPageURL states,
+// for any URL a client or the console opens; what names the URL in errors.
+func validatePublicHTTPSURL(what, value string) error {
 	if len(value) > MaxSubscriptionResponseHeaderBytes || strings.ContainsFunc(value, func(r rune) bool {
 		return unicode.IsControl(r) || unicode.IsSpace(r)
 	}) {
-		return errors.New("web page url is too long or carries whitespace")
+		return fmt.Errorf("%s is too long or carries whitespace", what)
 	}
 	u, err := url.Parse(value)
 	if err != nil {
-		return fmt.Errorf("web page url: %w", err)
+		return fmt.Errorf("%s: %w", what, err)
 	}
 	if u.Scheme != "https" || u.Opaque != "" || u.Host == "" {
-		return errors.New("web page url must be an absolute https url")
+		return fmt.Errorf("%s must be an absolute https url", what)
 	}
 	if u.User != nil {
-		return errors.New("web page url must not carry userinfo")
+		return fmt.Errorf("%s must not carry userinfo", what)
 	}
 	host := strings.ToLower(u.Hostname())
 	if addr, err := netip.ParseAddr(host); err == nil {
+		// A zone names an interface of whoever dials, so the same literal
+		// reaches a different place on every host.
+		if addr.Zone() != "" {
+			return fmt.Errorf("%s host carries an ipv6 zone", what)
+		}
 		if !publicAddress(addr.Unmap()) {
-			return errors.New("web page url host is not a public address")
+			return fmt.Errorf("%s host is not a public address", what)
 		}
 		return nil
 	}
+	// A trailing dot is the fully qualified form of the same name, and it
+	// would carry "localhost." past the suffix checks below.
+	if strings.HasSuffix(host, ".") {
+		return fmt.Errorf("%s host ends in a dot", what)
+	}
 	if !strings.Contains(host, ".") || host == "localhost" || strings.HasSuffix(host, ".localhost") ||
 		strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".internal") {
-		return errors.New("web page url host is a local name")
+		return fmt.Errorf("%s host is a local name", what)
 	}
 	if numericAddressName(host) {
-		return errors.New("web page url host is a numeric address")
+		return fmt.Errorf("%s host is a numeric address", what)
 	}
 	return nil
 }
@@ -438,10 +468,19 @@ func numericAddressName(host string) bool {
 }
 
 // nonPublicPrefixes are ranges netip counts as global unicast that are not
-// public: RFC 6598 carrier-grade NAT space, and the NAT64 prefixes, which
-// embed an IPv4 address the egress policy refuses.
+// public. The IPv4 and documentation ranges mirror the core's outbound guard
+// (blockedSpecialUsePrefixes in lattice-server internal/outbound): RFC 6598
+// carrier-grade NAT space, the three TEST-NET documentation ranges and
+// 2001:db8::/32, and the 198.18.0.0/15 benchmarking range, which proxy
+// clients hand out as fake-ip addresses. The NAT64 prefixes are added because
+// they embed an IPv4 address the egress policy refuses.
 var nonPublicPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("2001:db8::/32"),
 	netip.MustParsePrefix("64:ff9b::/96"),
 	netip.MustParsePrefix("64:ff9b:1::/48"),
 }

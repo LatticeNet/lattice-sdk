@@ -137,6 +137,9 @@ func TestSelectionPlanStructuralRefusals(t *testing.T) {
 		"malformed placeholder":   {Kind: SelectionPlanKindNodes, Nodes: []SelectionPlanNode{{LineUUID: catalogueLineA, Placeholders: map[string]string{"uuid": "real-uuid"}, Node: json.RawMessage(`{}`)}}},
 		"bad line uuid":           {Kind: SelectionPlanKindNodes, Nodes: []SelectionPlanNode{{LineUUID: "line-a", Node: json.RawMessage(`{}`)}}},
 		"bad response chain":      {Kind: SelectionPlanKindNodes, ResponseChain: []ResponseTransformerStep{{Name: "empty"}}},
+		// A plan that arrives inside a render reply is validated, not decoded
+		// by DecodeSelectionPlan, so Validate scans each node itself.
+		"duplicate key in a node": {Kind: SelectionPlanKindNodes, Nodes: []SelectionPlanNode{{Provider: true, Node: json.RawMessage(`{"server":"a.example","server":"evil.example"}`)}}},
 	}
 	for name, plan := range cases {
 		if err := plan.Validate(); err == nil {
@@ -209,9 +212,13 @@ func TestSelectionPlanEncodedSizeAtTheBound(t *testing.T) {
 		t.Fatal("plan one byte over the bound decoded")
 	}
 	for name, raw := range map[string]string{
-		"unknown field": `{"kind":"nodes","nodes":[],"identity":"vu_7"}`,
-		"trailing data": `{"kind":"nodes","nodes":[]} {}`,
-		"invalid plan":  `{"kind":"nodes","nodes":[],"document":"x"}`,
+		"unknown field":         `{"kind":"nodes","nodes":[],"identity":"vu_7"}`,
+		"trailing data":         `{"kind":"nodes","nodes":[]} {}`,
+		"invalid plan":          `{"kind":"nodes","nodes":[],"document":"x"}`,
+		"duplicate top key":     `{"kind":"document","kind":"nodes","nodes":[]}`,
+		"duplicate node key":    `{"kind":"nodes","nodes":[{"provider":true,"node":{"server":"a.example","server":"evil.example"}}]}`,
+		"duplicate nested key":  `{"kind":"nodes","nodes":[{"provider":true,"node":{"reality-opts":{"short-id":"a","short-id":"b"}}}]}`,
+		"duplicate placeholder": `{"kind":"nodes","nodes":[{"line_uuid":"` + catalogueLineA + `","placeholders":{"uuid":"x","uuid":"` + testPlaceholder(catalogueLineA, "uuid") + `"},"node":{}}]}`,
 	} {
 		if _, err := DecodeSelectionPlan([]byte(raw)); err == nil {
 			t.Fatalf("%s accepted", name)

@@ -169,8 +169,15 @@ func CountPlanPlaceholders(document string) map[string]int {
 // Validate checks a plan's structure and bounds. A node the core will exclude
 // (a fleet node without a line, a fifth clone, a node outside its line's
 // allowed hosts) is not a structural error; a node that contradicts itself
-// is.
+// is, and so is a node object with a duplicate key at any depth, where the
+// core's validator and its binder could read different values.
 func (p SelectionPlan) Validate() error {
+	return p.validate(false)
+}
+
+// validate is Validate; keysChecked skips the duplicate-key scan of each node
+// when the caller already scanned the whole encoded plan.
+func (p SelectionPlan) validate(keysChecked bool) error {
 	switch p.Kind {
 	case SelectionPlanKindNodes:
 		if p.Document != "" {
@@ -189,6 +196,11 @@ func (p SelectionPlan) Validate() error {
 	for i, node := range p.Nodes {
 		if err := node.validate(); err != nil {
 			return fmt.Errorf("plan node %d: %w", i, err)
+		}
+		if !keysChecked {
+			if err := rejectDuplicateJSONFields(node.Node); err != nil {
+				return fmt.Errorf("plan node %d: %w", i, err)
+			}
 		}
 		if p.Kind == SelectionPlanKindDocument && node.Provider {
 			return fmt.Errorf("plan node %d: a document plan carries fleet nodes only", i)
@@ -262,11 +274,23 @@ func EncodeSelectionPlan(p SelectionPlan) ([]byte, error) {
 	return raw, nil
 }
 
-// DecodeSelectionPlan decodes a plan with its size checked first, unknown
-// fields refused and no trailing data, then validates it.
+// DecodeSelectionPlan decodes a plan with its size checked first, duplicate
+// keys refused at any depth, unknown fields refused and no trailing data,
+// then validates it.
+//
+// Refusing unknown fields is the plan's compatibility policy, and it is
+// deliberate. The catalogue negotiates through selector_fields because an
+// unknown selector field only narrows a read; a plan field would change what
+// the core binds, and a core that dropped one would bind without it. So a
+// core refuses a plan field it does not know, and a plugin emits a new plan
+// field only when its manifest's compatibility.server floor guarantees a core
+// that knows it.
 func DecodeSelectionPlan(raw []byte) (SelectionPlan, error) {
 	if len(raw) == 0 || len(raw) > MaxSelectionPlanBytes {
 		return SelectionPlan{}, errors.New("invalid plan size")
+	}
+	if err := rejectDuplicateJSONFields(raw); err != nil {
+		return SelectionPlan{}, err
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -277,7 +301,7 @@ func DecodeSelectionPlan(raw []byte) (SelectionPlan, error) {
 	if err := requireJSONEOF(decoder); err != nil {
 		return SelectionPlan{}, err
 	}
-	if err := plan.Validate(); err != nil {
+	if err := plan.validate(true); err != nil {
 		return SelectionPlan{}, err
 	}
 	return plan, nil

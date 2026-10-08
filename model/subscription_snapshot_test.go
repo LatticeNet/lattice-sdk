@@ -2,6 +2,7 @@ package model
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -183,27 +184,53 @@ func TestSubscriptionSnapshotAllowsPersistedEnvelopeExpansionForStoreValidation(
 	}
 }
 
-// The raw bound rose from 1 MiB to 4 MiB in design 28. A Raw at the bound
-// must survive the store's encode and decode round trip in its worst JSON
-// escaping, which is what MaxSubscriptionSnapshotBytes is derived from; one
-// byte more is refused.
-func TestSubscriptionSnapshotRawBoundSurvivesWorstCaseEscaping(t *testing.T) {
+// The raw bound rose from 1 MiB to 4 MiB in design 28. The document bound
+// follows the render request bound, not the six-fold worst case of JSON
+// escaping: a Raw at the raw bound fits whether it escapes not at all or
+// every byte to two, sealed it fits with a manifest at its own bound, and a
+// Raw whose escaping no render request could carry is refused.
+func TestSubscriptionSnapshotRawBoundFitsWhatARenderCanCarry(t *testing.T) {
 	t.Parallel()
 	if MaxSubscriptionRawBytes != 4<<20 {
 		t.Fatalf("MaxSubscriptionRawBytes = %d, want 4 MiB", MaxSubscriptionRawBytes)
 	}
-	raw := mustMarshalSnapshot(t, SubscriptionSnapshot{SchemaVersion: 2, PluginID: "p", SubscriptionID: "s", Raw: strings.Repeat("<", MaxSubscriptionRawBytes)})
-	if len(raw) <= 6*MaxSubscriptionRawBytes || len(raw) > MaxSubscriptionSnapshotBytes {
-		t.Fatalf("worst-case snapshot encodes to %d bytes, outside (%d, %d]", len(raw), 6*MaxSubscriptionRawBytes, MaxSubscriptionSnapshotBytes)
+	if MaxSubscriptionSnapshotBytes >= 10<<20 {
+		t.Fatalf("MaxSubscriptionSnapshotBytes = %d, want it sized from the 8 MiB request bound", MaxSubscriptionSnapshotBytes)
+	}
+	snapshot := func(raw string) SubscriptionSnapshot {
+		return SubscriptionSnapshot{SchemaVersion: 2, PluginID: "p", SubscriptionID: "s", Raw: raw}
+	}
+	for name, raw := range map[string]string{
+		"plain":       strings.Repeat("r", MaxSubscriptionRawBytes),
+		"two-fold":    strings.Repeat(`"`, MaxSubscriptionRawBytes),
+		"uri list":    strings.Repeat("vless://u@h:443?security=reality&sni=a.example&fp=chrome#n\n", MaxSubscriptionRawBytes/60),
+		"mixed lines": strings.Repeat("name: <a & b>\n", MaxSubscriptionRawBytes/14),
+	} {
+		encoded := mustMarshalSnapshot(t, snapshot(raw))
+		var got SubscriptionSnapshot
+		if err := json.Unmarshal(encoded, &got); err != nil {
+			t.Fatalf("%s raw of %d bytes (%d encoded) refused: %v", name, len(raw), len(encoded), err)
+		}
+		if got.Raw != raw {
+			t.Fatalf("%s raw did not round-trip", name)
+		}
+	}
+	// Sealed at rest: "lat$1$" and unpadded base64url of a 12-byte nonce, the
+	// raw bound and a 16-byte tag.
+	sealedLen := len("lat$1$") + base64.RawURLEncoding.EncodedLen(12+MaxSubscriptionRawBytes+16)
+	sealed := mustMarshalSnapshot(t, snapshot("lat$1$"+strings.Repeat("A", sealedLen-len("lat$1$"))))
+	if len(sealed)+MaxSubscriptionSourceManifestBytes > MaxSubscriptionSnapshotBytes {
+		t.Fatalf("a sealed raw at the bound (%d bytes) leaves no room for a %d-byte manifest", len(sealed), MaxSubscriptionSourceManifestBytes)
 	}
 	var got SubscriptionSnapshot
-	if err := json.Unmarshal(raw, &got); err != nil {
-		t.Fatalf("raw at the bound refused: %v", err)
+	if err := json.Unmarshal(sealed, &got); err != nil {
+		t.Fatalf("sealed raw at the bound refused: %v", err)
 	}
-	if len(got.Raw) != MaxSubscriptionRawBytes {
-		t.Fatalf("raw decoded to %d bytes", len(got.Raw))
+	worst := mustMarshalSnapshot(t, snapshot(strings.Repeat("<", MaxSubscriptionRawBytes)))
+	if err := json.Unmarshal(worst, &got); err == nil || !strings.Contains(err.Error(), "render request") {
+		t.Fatalf("raw escaping to %d bytes: err = %v, want a document bound refusal", len(worst), err)
 	}
-	over := mustMarshalSnapshot(t, SubscriptionSnapshot{SchemaVersion: 2, PluginID: "p", SubscriptionID: "s", Raw: strings.Repeat("r", MaxSubscriptionRawBytes+1)})
+	over := mustMarshalSnapshot(t, snapshot(strings.Repeat("r", MaxSubscriptionRawBytes+1)))
 	if err := json.Unmarshal(over, &got); err == nil {
 		t.Fatal("raw one byte over the bound accepted")
 	}

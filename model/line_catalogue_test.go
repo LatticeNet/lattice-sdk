@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -135,16 +136,74 @@ func TestLineCatalogueRowRefusesBrokenIdentityAndEnums(t *testing.T) {
 	}
 }
 
+// The literal sets below are what the SDK's template guard is. They are
+// written out here, not read from the maps under test, so dropping a member
+// from either map fails this test instead of passing unnoticed.
+var (
+	pinnedReservedParams = []string{"add", "flow", "id", "port", "ps", "v"}
+	pinnedTemplateParams = []string{
+		"aid", "allowInsecure", "alpn", "congestion_control", "encryption", "fp", "headerType", "host", "insecure", "mode",
+		"net", "path", "pbk", "pinSHA256", "security", "serviceName", "sid", "sni", "spx", "tls", "type",
+	}
+)
+
+func sortedNames(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for name, member := range set {
+		if member {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func TestLineTemplateParamSetsArePinned(t *testing.T) {
+	for name, c := range map[string]struct {
+		got  map[string]bool
+		want []string
+	}{"reserved": {LineTemplateReservedParams, pinnedReservedParams}, "allowed": {lineTemplateParams, pinnedTemplateParams}} {
+		want := append([]string(nil), c.want...)
+		sort.Strings(want)
+		if got := sortedNames(c.got); !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s template params = %v, want %v", name, got, want)
+		}
+	}
+	for _, name := range pinnedReservedParams {
+		if lineTemplateParams[name] {
+			t.Fatalf("reserved param %q is also on the allowlist", name)
+		}
+	}
+}
+
 // The template is the credential-free surface: the parameters a client
-// entry takes from an identity's credential, and anything that looks like a
-// sealed secret, a key or a URL, are refused, as are templates past the
-// core store's own bounds.
+// entry takes from an identity's credential, every parameter the core's
+// builder does not keep (the names other protocols hold a secret under
+// among them), and anything that looks like a sealed secret, a key or a URL
+// are refused, as are templates past the core store's own bounds.
 func TestLineCatalogueTemplateStaysCredentialFree(t *testing.T) {
-	for key := range LineTemplateReservedParams {
+	for _, key := range pinnedReservedParams {
 		row := fullCatalogueRow(t)
 		row.Template.Params[key] = "x"
 		if err := row.Validate(); err == nil || !strings.Contains(err.Error(), "reserved") {
 			t.Fatalf("reserved param %q: err = %v", key, err)
+		}
+	}
+	for _, key := range []string{
+		"password", "auth", "auth_str", "auth-str", "uuid", "psk", "obfs-password", "obfs", "private-key", "privateKey",
+		"pre-shared-key", "token", "username", "Security", "foo",
+	} {
+		row := fullCatalogueRow(t)
+		row.Template.Params[key] = "x"
+		if err := row.Validate(); err == nil || !strings.Contains(err.Error(), "not a connection parameter") {
+			t.Fatalf("param %q outside the allowlist: err = %v", key, err)
+		}
+	}
+	for _, key := range pinnedTemplateParams {
+		row := fullCatalogueRow(t)
+		row.Template.Params[key] = "x"
+		if err := row.Validate(); err != nil {
+			t.Fatalf("allowlisted param %q refused: %v", key, err)
 		}
 	}
 	for name, value := range map[string]string{
@@ -156,20 +215,33 @@ func TestLineCatalogueTemplateStaysCredentialFree(t *testing.T) {
 			t.Fatalf("%s param value accepted", name)
 		}
 	}
-	params := func(n int) map[string]string {
-		out := make(map[string]string, n)
-		for i := 0; i < n; i++ {
-			out[fmt.Sprintf("p%02d", i)] = "v"
+	// The allowlist is smaller than the store's count bound, so a template
+	// can carry every allowlisted param at once; the count bound still
+	// refuses a larger map before any key is read.
+	if len(pinnedTemplateParams) > MaxLineTemplateParams {
+		t.Fatalf("%d allowlisted params exceed the %d-param bound", len(pinnedTemplateParams), MaxLineTemplateParams)
+	}
+	every := make(map[string]string, len(pinnedTemplateParams))
+	for _, key := range pinnedTemplateParams {
+		every[key] = "v"
+	}
+	over := make(map[string]string, MaxLineTemplateParams+1)
+	for i := 0; i <= MaxLineTemplateParams; i++ {
+		over[fmt.Sprintf("p%02d", i)] = "v"
+	}
+	{
+		row := fullCatalogueRow(t)
+		row.Template.Params = over
+		if err := row.Validate(); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("more than %d params", MaxLineTemplateParams)) {
+			t.Fatalf("params over bound: err = %v", err)
 		}
-		return out
 	}
 	edges := []struct {
 		name     string
 		edit     func(*LineCatalogueTemplate)
 		accepted bool
 	}{
-		{"params at bound", func(t *LineCatalogueTemplate) { t.Params = params(MaxLineTemplateParams) }, true},
-		{"params over bound", func(t *LineCatalogueTemplate) { t.Params = params(MaxLineTemplateParams + 1) }, false},
+		{"every allowlisted param", func(t *LineCatalogueTemplate) { t.Params = every }, true},
 		{"value at bound", func(t *LineCatalogueTemplate) { t.Params["path"] = strings.Repeat("v", MaxLineTemplateValueBytes) }, true},
 		{"value over bound", func(t *LineCatalogueTemplate) { t.Params["path"] = strings.Repeat("v", MaxLineTemplateValueBytes+1) }, false},
 		{"dropped at bound", func(t *LineCatalogueTemplate) {
@@ -191,6 +263,95 @@ func TestLineCatalogueTemplateStaysCredentialFree(t *testing.T) {
 		if err := row.Validate(); (err == nil) != e.accepted {
 			t.Fatalf("%s: Validate() = %v, want accepted=%v", e.name, err, e.accepted)
 		}
+	}
+}
+
+// Extra is the row's open channel, so it is bounded and screened like a
+// template: lowercase field names, no credential name at any depth, no
+// string that looks like a sealed secret, a private key or a URL, and no
+// duplicate key that would hide a value from the screen.
+func TestLineCatalogueRowExtraIsBoundedAndScreened(t *testing.T) {
+	withExtra := func(extra map[string]json.RawMessage) error {
+		row := fullCatalogueRow(t)
+		row.Extra = extra
+		return row.Validate()
+	}
+	accepted := map[string]map[string]json.RawMessage{
+		"scalar":        {"ip_quality": json.RawMessage(`"high"`)},
+		"nested object": {"ip_quality": json.RawMessage(`{"score":0.9,"source":"probe","asns":[2497,"IIJ"]}`)},
+		"null":          {"retired_at": json.RawMessage(`null`)},
+	}
+	for name, extra := range accepted {
+		if err := withExtra(extra); err != nil {
+			t.Fatalf("%s extra refused: %v", name, err)
+		}
+	}
+	refused := map[string]map[string]json.RawMessage{
+		"uppercase key":           {"IPQuality": json.RawMessage(`1`)},
+		"hyphenated key":          {"ip-quality": json.RawMessage(`1`)},
+		"empty key":               {"": json.RawMessage(`1`)},
+		"digit first":             {"1x": json.RawMessage(`1`)},
+		"credential key":          {"password": json.RawMessage(`"x"`)},
+		"uuid key":                {"uuid": json.RawMessage(`"x"`)},
+		"key with a token stem":   {"api_token": json.RawMessage(`"x"`)},
+		"nested private key name": {"meta": json.RawMessage(`{"privateKey":"x"}`)},
+		"credential in an array":  {"list": json.RawMessage(`[{"obfs-password":"x"}]`)},
+		"nested vmess id":         {"meta": json.RawMessage(`{"vmess":{"id":"x"}}`)},
+		"url string":              {"note": json.RawMessage(`"see https://x.example"`)},
+		"escaped url string":      {"note": json.RawMessage(`"vless\u003a//x"`)},
+		"sealed in an array":      {"a": json.RawMessage(`["ok","lat$1$abc"]`)},
+		"private key text":        {"pem": json.RawMessage(`"-----BEGIN PRIVATE KEY-----"`)},
+		"duplicate hides a value": {"a": json.RawMessage(`{"b":"lat$1$abc","b":"ok"}`)},
+		"invalid json":            {"a": json.RawMessage(`{"b":`)},
+	}
+	for name, extra := range refused {
+		if err := withExtra(extra); err == nil {
+			t.Fatalf("%s extra accepted", name)
+		}
+	}
+	sized := func(total int) map[string]json.RawMessage {
+		key := "padding"
+		return map[string]json.RawMessage{key: json.RawMessage(`"` + strings.Repeat("p", total-len(key)-2) + `"`)}
+	}
+	if err := withExtra(sized(MaxLineCatalogueExtraBytes)); err != nil {
+		t.Fatalf("extra at %d bytes refused: %v", MaxLineCatalogueExtraBytes, err)
+	}
+	if err := withExtra(sized(MaxLineCatalogueExtraBytes + 1)); err == nil {
+		t.Fatal("extra one byte over the bound accepted")
+	}
+}
+
+// padRowTo grows a row's node tags until the row encodes to exactly size
+// bytes.
+func padRowTo(t *testing.T, row LineCatalogueRow, size int) LineCatalogueRow {
+	t.Helper()
+	row.NodeTags = append([]string(nil), row.NodeTags...)
+	for {
+		gap := size - len(mustJSON(t, row))
+		switch {
+		case gap == 0:
+			return row
+		case gap < 0:
+			t.Fatalf("row already encodes past %d bytes", size)
+		case gap > MaxSubscriptionURIBytes+3:
+			row.NodeTags = append(row.NodeTags, strings.Repeat("t", MaxSubscriptionURIBytes))
+		case gap >= 4:
+			// A new tag costs its length plus two quotes and a comma.
+			row.NodeTags = append(row.NodeTags, strings.Repeat("t", gap-3))
+		default:
+			row.NodeTags[0] += strings.Repeat("t", gap)
+		}
+	}
+}
+
+func TestLineCatalogueRowEncodedSizeBound(t *testing.T) {
+	at := padRowTo(t, fullCatalogueRow(t), MaxLineCatalogueRowBytes)
+	if err := at.Validate(); err != nil {
+		t.Fatalf("row at %d bytes refused: %v", MaxLineCatalogueRowBytes, err)
+	}
+	over := padRowTo(t, fullCatalogueRow(t), MaxLineCatalogueRowBytes+1)
+	if err := over.Validate(); err == nil {
+		t.Fatal("row one byte over the bound accepted")
 	}
 }
 
@@ -308,13 +469,10 @@ func TestLineCatalogueResponsePageBounds(t *testing.T) {
 		}
 		return resp
 	}
+	// A full page of realistic rows is well inside the byte bound.
 	full := page(MaxLineCataloguePageRows)
 	if err := full.Validate(); err != nil {
 		t.Fatalf("full page refused: %v", err)
-	}
-	// A page of dense rows must fit the host-call result a plugin receives.
-	if size := len(mustJSON(t, full)); size > plugin.DefaultMaxHostResponsePayloadBytes {
-		t.Fatalf("a full page of dense rows is %d bytes, over the %d host result cap", size, plugin.DefaultMaxHostResponsePayloadBytes)
 	}
 	if err := page(MaxLineCataloguePageRows + 1).Validate(); err == nil {
 		t.Fatal("page one row over the bound accepted")
@@ -331,5 +489,63 @@ func TestLineCatalogueResponsePageBounds(t *testing.T) {
 	}
 	if want := `{"catalogue_version":"cv1:9f2c","rows":[]}`; mustJSON(t, LineCatalogueResponse{CatalogueVersion: "cv1:9f2c", Rows: []LineCatalogueRow{}}) != want {
 		t.Fatalf("last empty page encodes as %s", mustJSON(t, LineCatalogueResponse{CatalogueVersion: "cv1:9f2c", Rows: []LineCatalogueRow{}}))
+	}
+}
+
+// The byte bound is what keeps a page inside the host-call result: a page of
+// dense rows under the row-count bound is refused by Validate, not by the
+// host boundary. Validate sums the rows it already encoded, so this also
+// checks that sum against the real encoding, byte for byte.
+func TestLineCatalogueResponsePageByteBound(t *testing.T) {
+	if MaxLineCataloguePageBytes >= plugin.DefaultMaxHostResponsePayloadBytes {
+		t.Fatalf("page bound %d is not inside the %d host result cap", MaxLineCataloguePageBytes, plugin.DefaultMaxHostResponsePayloadBytes)
+	}
+	if MaxLineCatalogueRowBytes > MaxLineCataloguePageBytes {
+		t.Fatal("a row at its bound would not fit a page")
+	}
+	build := func(rows []LineCatalogueRow) LineCatalogueResponse {
+		return LineCatalogueResponse{CatalogueVersion: "cv1:9f2c", Cursor: "next", SelectorFields: LineCatalogueSelectorFields(), Rows: rows}
+	}
+	withUUIDs := func(template LineCatalogueRow, n int) []LineCatalogueRow {
+		rows := make([]LineCatalogueRow, n)
+		for i := range rows {
+			rows[i] = template
+			rows[i].LineUUID = fmt.Sprintf("00000000-0000-4000-8000-%012x", i)
+		}
+		return rows
+	}
+
+	// 1000 rows of about 4.2 KB each: inside the row-count bound, past the
+	// byte bound.
+	dense := build(withUUIDs(padRowTo(t, fullCatalogueRow(t), 4200), MaxLineCataloguePageRows))
+	if size := len(mustJSON(t, dense)); size <= MaxLineCataloguePageBytes {
+		t.Fatalf("dense fixture is only %d bytes", size)
+	}
+	if err := dense.Validate(); err == nil || !strings.Contains(err.Error(), "encodes to") {
+		t.Fatalf("dense page past the byte bound: err = %v", err)
+	}
+
+	// 70 rows that fill the page to exactly the bound, then one byte more.
+	const n = 70
+	head := len(mustJSON(t, build([]LineCatalogueRow{})))
+	each := (MaxLineCataloguePageBytes - head) / n
+	last := MaxLineCataloguePageBytes - head - (n - 1) - (n-1)*each
+	rows := withUUIDs(padRowTo(t, fullCatalogueRow(t), each), n)
+	lastRow := func(size int) LineCatalogueRow {
+		row := fullCatalogueRow(t)
+		row.LineUUID = rows[n-1].LineUUID
+		return padRowTo(t, row, size)
+	}
+	rows[n-1] = lastRow(last)
+	exact := build(rows)
+	if size := len(mustJSON(t, exact)); size != MaxLineCataloguePageBytes {
+		t.Fatalf("fixture encodes to %d bytes, want %d", size, MaxLineCataloguePageBytes)
+	}
+	if err := exact.Validate(); err != nil {
+		t.Fatalf("page at the byte bound refused: %v", err)
+	}
+	rows[n-1] = lastRow(last + 1)
+	if err := build(rows).Validate(); err == nil {
+		t.Fatal("page one byte over the byte bound accepted")
 	}
 }

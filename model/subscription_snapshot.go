@@ -58,8 +58,11 @@ func (s *SubscriptionSnapshot) UnmarshalJSON(raw []byte) error {
 	// The document bound is MaxSubscriptionSnapshotBytes, not the response
 	// bound: a Raw at MaxSubscriptionRawBytes, escaped or sealed, is larger
 	// than the response bound once it sits inside the record.
-	if len(raw) == 0 || len(raw) > MaxSubscriptionSnapshotBytes {
+	if len(raw) == 0 {
 		return fmt.Errorf("invalid subscription snapshot size")
+	}
+	if len(raw) > MaxSubscriptionSnapshotBytes {
+		return fmt.Errorf("subscription snapshot encodes to %d bytes, over the %d-byte bound that a render request can carry", len(raw), MaxSubscriptionSnapshotBytes)
 	}
 	if err := rejectDuplicateJSONFields(raw); err != nil {
 		return err

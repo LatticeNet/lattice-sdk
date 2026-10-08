@@ -1518,6 +1518,14 @@ const (
 	DDNSProviderWebhook    = "webhook"
 )
 
+// DDNSProfile.CommentMode values. An empty mode is the default mode, so a
+// profile saved before comments existed keeps working unchanged.
+const (
+	DDNSCommentDefault = "default"
+	DDNSCommentCustom  = "custom"
+	DDNSCommentNone    = "none"
+)
+
 // DDNSProfile describes how a node's public IP should be published to DNS. It is
 // bound to a node; when that node's observed public IP changes, the bound
 // profiles' records are updated.
@@ -1540,6 +1548,15 @@ type DDNSProfile struct {
 
 	// Cloudflare provider
 	CFAPIToken string `json:"cf_api_token,omitempty"`
+	// CommentMode decides the comment Lattice writes on each Cloudflare
+	// record, so an operator can tell Lattice-managed records apart in the
+	// Cloudflare dashboard. "" and "default" render the built-in template,
+	// "custom" renders RecordComment, and "none" means Lattice never sets or
+	// changes the record's comment. The webhook provider ignores both fields.
+	CommentMode string `json:"comment_mode,omitempty"`
+	// RecordComment is the custom template, used only in "custom" mode. It
+	// takes the same #name# placeholders as the webhook templates.
+	RecordComment string `json:"record_comment,omitempty"`
 
 	// Webhook provider. Body/URL support the templates #ip#, #domain#, #type#.
 	WebhookURL     string `json:"webhook_url,omitempty"`

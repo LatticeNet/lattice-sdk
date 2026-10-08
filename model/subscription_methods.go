@@ -422,13 +422,38 @@ func ValidateSubscriptionWebPageURL(value string) error {
 		strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".internal") {
 		return errors.New("web page url host is a local name")
 	}
+	if numericAddressName(host) {
+		return errors.New("web page url host is a numeric address")
+	}
 	return nil
 }
 
-// sharedAddressSpace is RFC 6598 carrier-grade NAT space, which netip does
-// not count as private.
-var sharedAddressSpace = netip.MustParsePrefix("100.64.0.0/10")
+// numericAddressName reports whether a host that netip did not parse as an
+// address ends in a numeric label. A top-level label is never numeric, so
+// such a host is an address in the shorthand clients still accept ("127.1",
+// "0x7f.1"), and it must not pass as a name.
+func numericAddressName(host string) bool {
+	last := host[strings.LastIndexByte(host, '.')+1:]
+	return strings.TrimLeft(last, "0123456789") == "" || strings.HasPrefix(last, "0x")
+}
+
+// nonPublicPrefixes are ranges netip counts as global unicast that are not
+// public: RFC 6598 carrier-grade NAT space, and the NAT64 prefixes, which
+// embed an IPv4 address the egress policy refuses.
+var nonPublicPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+}
 
 func publicAddress(addr netip.Addr) bool {
-	return addr.IsGlobalUnicast() && !addr.IsPrivate() && !sharedAddressSpace.Contains(addr)
+	if !addr.IsGlobalUnicast() || addr.IsPrivate() {
+		return false
+	}
+	for _, prefix := range nonPublicPrefixes {
+		if prefix.Contains(addr) {
+			return false
+		}
+	}
+	return true
 }

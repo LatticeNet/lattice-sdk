@@ -88,6 +88,8 @@ func TestSubscriptionWebPageURLChecks(t *testing.T) {
 		"https://127.0.0.1/", "https://[::1]/", "https://[fe80::1]/", "https://169.254.169.254/", "https://100.64.0.1/",
 		"https://0.0.0.0/", "https://[::ffff:10.0.0.1]/", "https://[fd00::1]/", "https://224.0.0.1/",
 		"https://localhost/", "https://router.local/", "https://db.internal/", "https://intranet/", "https://a.localhost/",
+		"https://127.1/", "https://10.1.1/", "https://0x7f.1/", "https://0x7f000001/", "https://017700000001.1/",
+		"https://[64:ff9b::a00:1]/", "https://[64:ff9b:1::a00:1]/",
 		"https://provider.example/ a", "https://provider.example/\r\nX: y", long(MaxSubscriptionResponseHeaderBytes + 1),
 	}
 	for _, value := range accepted {

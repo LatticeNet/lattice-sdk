@@ -368,7 +368,7 @@ func (r LineCatalogueRow) Validate() error {
 		}
 	}
 	for _, ddns := range r.DDNSNames {
-		if net.ParseIP(ddns.Name) != nil || !validSubscriptionHost(ddns.Name) {
+		if net.ParseIP(ddns.Name) != nil || !validSubscriptionHost(ddns.Name) || numericAddressName(ddns.Name) {
 			return fmt.Errorf("line catalogue row %s: invalid ddns name %q", r.LineUUID, ddns.Name)
 		}
 	}

@@ -113,6 +113,7 @@ func TestLineCatalogueRowRefusesBrokenIdentityAndEnums(t *testing.T) {
 		"address not canon":  func(r *LineCatalogueRow) { r.Addresses = []string{"2001:DB8::30"} },
 		"ddns ip":            func(r *LineCatalogueRow) { r.DDNSNames = []LineCatalogueDDNSName{{Name: "203.0.113.30"}} },
 		"ddns uppercase":     func(r *LineCatalogueRow) { r.DDNSNames = []LineCatalogueDDNSName{{Name: "TYO3.example.net"}} },
+		"ddns shorthand ip":  func(r *LineCatalogueRow) { r.DDNSNames = []LineCatalogueDDNSName{{Name: "127.1"}} },
 		"chain role":         func(r *LineCatalogueRow) { r.Chain.Role = "middle" },
 		"path state":         func(r *LineCatalogueRow) { r.Chain.PathState = "stuck" },
 		"downstream":         func(r *LineCatalogueRow) { r.Chain.DownstreamLineUUID = "line-b" },

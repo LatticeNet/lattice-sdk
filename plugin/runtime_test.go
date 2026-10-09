@@ -709,7 +709,7 @@ func TestDecodeInvokeV2HostileMatrix(t *testing.T) {
 		{"oversize", `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"1","request":{"blob":"` + strings.Repeat("x", DefaultMaxRequestBytes) + `"}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := decodeInvokeV2([]byte(tc.raw), 1); err == nil {
+			if _, err := decodeInvokeV2([]byte(tc.raw), 1, 0); err == nil {
 				t.Fatal("accepted hostile frame")
 			}
 		})
@@ -730,6 +730,59 @@ func TestServeV2AllowsNilHost(t *testing.T) {
 		return Response{OK: true}
 	}), 1); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// invokeFrameOfSize builds a valid invoke frame padded to exactly n bytes.
+func invokeFrameOfSize(t *testing.T, n int) []byte {
+	t.Helper()
+	head := `{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"1","request":{"action":"call","payload":{"blob":"`
+	tail := `"}}}`
+	if n < len(head)+len(tail) {
+		t.Fatalf("frame size %d is too small", n)
+	}
+	return []byte(head + strings.Repeat("x", n-len(head)-len(tail)) + tail)
+}
+
+func TestServeV2HonoursTheRuntimeRequestLimit(t *testing.T) {
+	const limit = 8 << 20
+	frame := invokeFrameOfSize(t, 5<<20)
+	var out bytes.Buffer
+	served := 0
+	rt := NewRuntime(RuntimeOptions{In: bytes.NewReader(append(frame, '\n')), Out: &out, MaxRequestBytes: limit})
+	err := rt.ServeV2(context.Background(), HandlerFunc(func(_ context.Context, req Request, _ *HostClient) Response {
+		served++
+		if len(req.Payload) < 5<<20-200 {
+			t.Fatalf("payload is %d bytes, want about 5 MiB", len(req.Payload))
+		}
+		return Response{OK: true}
+	}), 1)
+	if err != nil {
+		t.Fatalf("a 5 MiB invoke under an 8 MiB runtime limit was refused: %v", err)
+	}
+	if served != 1 {
+		t.Fatalf("served %d invocations, want 1", served)
+	}
+	if _, err := decodeInvokeV2(frame, 1, limit); err != nil {
+		t.Fatalf("decoder refused a frame under its limit: %v", err)
+	}
+	if _, err := decodeInvokeV2(invokeFrameOfSize(t, limit+1), 1, limit); err == nil {
+		t.Fatal("decoder accepted a frame over its limit")
+	}
+}
+
+func TestServeV2DefaultLimitStillRefusesLargeFrames(t *testing.T) {
+	frame := invokeFrameOfSize(t, DefaultMaxRequestBytes+1)
+	if _, err := decodeInvokeV2(frame, 1, 0); err == nil {
+		t.Fatal("the default limit accepted a frame one byte over it")
+	}
+	rt := NewRuntime(RuntimeOptions{In: bytes.NewReader(append(frame, '\n')), Out: &bytes.Buffer{}})
+	err := rt.ServeV2(context.Background(), HandlerFunc(func(context.Context, Request, *HostClient) Response {
+		t.Fatal("dispatched a frame over the default limit")
+		return Response{}
+	}), 1)
+	if err == nil {
+		t.Fatal("ServeV2 returned nil for a frame over the default limit")
 	}
 }
 
@@ -874,7 +927,7 @@ func FuzzV2Session(f *testing.F) {
 func FuzzStrictV2Decoder(f *testing.F) {
 	f.Add([]byte(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"1","request":{}}`))
 	f.Fuzz(func(t *testing.T, raw []byte) {
-		frame, err := decodeInvokeV2(raw, 1)
+		frame, err := decodeInvokeV2(raw, 1, 0)
 		if err == nil && (frame.Protocol != 2 || frame.Kind != "invoke" || frame.Generation != 1 || frame.InvocationID == "" || frame.Request == nil) {
 			t.Fatalf("semantic decoder accepted invalid frame")
 		}

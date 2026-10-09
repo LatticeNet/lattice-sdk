@@ -104,7 +104,7 @@ func TestStrictCorrelationIDsAreCanonicalAndBounded(t *testing.T) {
 	}
 	for _, id := range []string{"0", "01", "+1", "-1", "9223372036854775808", "inv"} {
 		raw := []byte(`{"protocol":2,"kind":"invoke","generation":1,"invocation_id":"` + id + `","request":{}}`)
-		if _, err := decodeInvokeV2(raw, 1); err == nil {
+		if _, err := decodeInvokeV2(raw, 1, 0); err == nil {
 			t.Fatalf("decoded invocation_id %q", id)
 		}
 	}

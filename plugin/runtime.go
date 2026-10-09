@@ -278,7 +278,7 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		frame, err := decodeInvokeV2(scanner.Bytes(), generation)
+		frame, err := decodeInvokeV2(scanner.Bytes(), generation, max)
 		if err != nil {
 			return fmt.Errorf("invalid stdio-json-v2 frame")
 		}
@@ -350,14 +350,20 @@ func sameWriter(a, b io.Writer) bool {
 	return false
 }
 
-func decodeInvokeV2(raw []byte, generation uint64) (struct {
+// decodeInvokeV2 decodes one invoke frame, refusing it before any allocation
+// when it is longer than maxBytes, the runtime's request limit (zero means
+// DefaultMaxRequestBytes).
+func decodeInvokeV2(raw []byte, generation uint64, maxBytes int) (struct {
 	Protocol     int      `json:"protocol"`
 	Kind         string   `json:"kind"`
 	Generation   uint64   `json:"generation"`
 	InvocationID string   `json:"invocation_id"`
 	Request      *Request `json:"request"`
 }, error) {
-	if len(raw) > DefaultMaxRequestBytes {
+	if maxBytes <= 0 {
+		maxBytes = DefaultMaxRequestBytes
+	}
+	if len(raw) > maxBytes {
 		return struct {
 			Protocol     int      `json:"protocol"`
 			Kind         string   `json:"kind"`

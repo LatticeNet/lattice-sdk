@@ -253,7 +253,10 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 	if max <= 0 {
 		max = DefaultMaxRequestBytes
 	}
-	scanner.Buffer(make([]byte, 0, 64*1024), max)
+	// bufio.Scanner refuses a line as long as its buffer, so the buffer gets
+	// one byte of headroom: a frame of exactly max bytes reaches the decoder,
+	// which is where the limit is enforced.
+	scanner.Buffer(make([]byte, 0, 64*1024), max+1)
 	ready := struct {
 		Protocol     int      `json:"protocol"`
 		Kind         string   `json:"kind"`
@@ -278,7 +281,7 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		frame, err := decodeInvokeV2(scanner.Bytes(), generation)
+		frame, err := decodeInvokeV2(scanner.Bytes(), generation, max)
 		if err != nil {
 			return fmt.Errorf("invalid stdio-json-v2 frame")
 		}
@@ -350,14 +353,20 @@ func sameWriter(a, b io.Writer) bool {
 	return false
 }
 
-func decodeInvokeV2(raw []byte, generation uint64) (struct {
+// decodeInvokeV2 decodes one invoke frame, refusing it before any allocation
+// when it is longer than maxBytes, the runtime's request limit (zero means
+// DefaultMaxRequestBytes).
+func decodeInvokeV2(raw []byte, generation uint64, maxBytes int) (struct {
 	Protocol     int      `json:"protocol"`
 	Kind         string   `json:"kind"`
 	Generation   uint64   `json:"generation"`
 	InvocationID string   `json:"invocation_id"`
 	Request      *Request `json:"request"`
 }, error) {
-	if len(raw) > DefaultMaxRequestBytes {
+	if maxBytes <= 0 {
+		maxBytes = DefaultMaxRequestBytes
+	}
+	if len(raw) > maxBytes {
 		return struct {
 			Protocol     int      `json:"protocol"`
 			Kind         string   `json:"kind"`
@@ -445,7 +454,11 @@ func (rt *Runtime) Serve(ctx context.Context, handler Handler) error {
 		ctx = context.Background()
 	}
 	scanner := bufio.NewScanner(rt.In)
-	scanner.Buffer(make([]byte, 0, 64*1024), rt.MaxRequestBytes)
+	max := rt.MaxRequestBytes
+	if max <= 0 {
+		max = DefaultMaxRequestBytes
+	}
+	scanner.Buffer(make([]byte, 0, 64*1024), max+1)
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
 			return err

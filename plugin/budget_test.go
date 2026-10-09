@@ -86,3 +86,20 @@ func TestBudgetHTTPResponseBytesBounds(t *testing.T) {
 		}
 	}
 }
+
+// The host-call ceiling is core's: a signed budget core loads must validate
+// here, and one past it must not.
+func TestBudgetHostCallsBoundIsCores(t *testing.T) {
+	base := InvokeBudgetSpec{TimeoutMS: 1000, StdoutBytes: 1024, StderrBytes: 1024}
+	atMax, overMax := base, base
+	atMax.HostCalls, overMax.HostCalls = 512, 513
+	if err := ValidateInvokeBudgetSpec(atMax); err != nil {
+		t.Fatalf("512 host calls, which core accepts, refused: %v", err)
+	}
+	if err := ValidateInvokeBudgetSpec(overMax); err == nil || !strings.Contains(err.Error(), "host_calls") {
+		t.Fatalf("513 host calls: err = %v", err)
+	}
+	if got := ResolveInvokeBudget(&overMax, DefaultInvokeBudgetSpec()).HostCalls; got != 512 {
+		t.Fatalf("over-maximum host calls resolved to %d, want 512", got)
+	}
+}

@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -199,4 +200,33 @@ func cronNumber(s string) (int, error) {
 		return 0, errors.New("not a number")
 	}
 	return strconv.Atoi(s)
+}
+
+// TaskSchedule asks the host to call one of the plugin's own methods on
+// schedule.Cron, replacing any schedule with the same id. The schedule is
+// validated here first, so a malformed one never reaches the host.
+func (c *HostClient) TaskSchedule(ctx context.Context, schedule TaskSchedule) error {
+	if err := schedule.Validate(); err != nil {
+		return err
+	}
+	_, err := c.Call(ctx, HostMethodTaskSchedule, schedule)
+	return err
+}
+
+// TaskUnschedule removes the schedule with id and reports whether one
+// existed.
+func (c *HostClient) TaskUnschedule(ctx context.Context, id string) (bool, error) {
+	raw, err := c.Call(ctx, HostMethodTaskUnschedule, struct {
+		ID string `json:"id"`
+	}{ID: id})
+	if err != nil {
+		return false, err
+	}
+	var out struct {
+		Removed bool `json:"removed"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return false, fmt.Errorf("decode task.unschedule response: %w", err)
+	}
+	return out.Removed, nil
 }

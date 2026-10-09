@@ -22,11 +22,14 @@ const (
 	HostMethodHTTPOperatorDo = "http.operator.do"
 	HostMethodKVGet          = "kv.get"
 	HostMethodKVPut          = "kv.put"
-	HostMethodNotifySend     = "notify.send"
-	HostMethodLogWrite       = "log.write"
-	HostMethodSecretGet      = "secret.get"
-	HostMethodSecretPut      = "secret.put"
-	HostMethodSecretDelete   = "secret.delete"
+	// HostMethodKVDelete removes one key from the plugin's own KV namespace.
+	// It needs the kv:write capability, as kv.put does.
+	HostMethodKVDelete     = "kv.delete"
+	HostMethodNotifySend   = "notify.send"
+	HostMethodLogWrite     = "log.write"
+	HostMethodSecretGet    = "secret.get"
+	HostMethodSecretPut    = "secret.put"
+	HostMethodSecretDelete = "secret.delete"
 	// DefaultMaxHostResponsePayloadBytes is the maximum decoded
 	// host_response.result payload.
 	DefaultMaxHostResponsePayloadBytes = 4 << 20
@@ -621,6 +624,15 @@ func (c *HostClient) KVPut(ctx context.Context, key string, value []byte) error 
 		Key         string `json:"key"`
 		ValueBase64 string `json:"value_base64"`
 	}{Key: key, ValueBase64: base64.StdEncoding.EncodeToString(value)})
+	return err
+}
+
+// KVDelete removes key from the plugin's KV namespace. Deleting a key that
+// does not exist is not an error.
+func (c *HostClient) KVDelete(ctx context.Context, key string) error {
+	_, err := c.Call(ctx, HostMethodKVDelete, struct {
+		Key string `json:"key"`
+	}{Key: key})
 	return err
 }
 

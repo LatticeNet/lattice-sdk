@@ -16,7 +16,13 @@ const (
 	HostMaxInvokeTimeoutMS   = 30_000
 	HostMaxInvokeStdoutBytes = 8 << 20
 	HostMaxInvokeStderrBytes = 1 << 20
-	HostMaxInvokeHostCalls   = 64
+	// HostMaxInvokeHostCalls matches lattice-server's internal/plugin
+	// invoke_budget.go, which is what core enforces. Core raised it from 64
+	// to 512 for the store-bounded shapes of the official plugins (an export
+	// reads one key per record, 256 records plus the index and Settings);
+	// a manifest this helper refuses would load, and one it accepts at the
+	// old cap was only a narrower subset.
+	HostMaxInvokeHostCalls = 512
 
 	// DefaultInvokeHTTPResponseBytes is the HTTP response body a host call
 	// may return to a method whose budget names none.

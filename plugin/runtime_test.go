@@ -771,6 +771,44 @@ func TestServeV2HonoursTheRuntimeRequestLimit(t *testing.T) {
 	}
 }
 
+func TestServeV2AcceptsAFrameOfExactlyTheLimit(t *testing.T) {
+	const limit = 2 << 20
+	served := 0
+	rt := NewRuntime(RuntimeOptions{In: bytes.NewReader(append(invokeFrameOfSize(t, limit), '\n')), Out: &bytes.Buffer{}, MaxRequestBytes: limit})
+	if err := rt.ServeV2(context.Background(), HandlerFunc(func(context.Context, Request, *HostClient) Response {
+		served++
+		return Response{OK: true}
+	}), 1); err != nil {
+		t.Fatalf("a frame of exactly the limit was refused: %v", err)
+	}
+	if served != 1 {
+		t.Fatalf("served %d invocations, want 1", served)
+	}
+	over := NewRuntime(RuntimeOptions{In: bytes.NewReader(append(invokeFrameOfSize(t, limit+1), '\n')), Out: &bytes.Buffer{}, MaxRequestBytes: limit})
+	if err := over.ServeV2(context.Background(), HandlerFunc(func(context.Context, Request, *HostClient) Response {
+		t.Fatal("dispatched a frame one byte over the limit")
+		return Response{}
+	}), 1); err == nil {
+		t.Fatal("ServeV2 returned nil for a frame one byte over the limit")
+	}
+}
+
+func TestServeV1UsesTheDefaultLimitWhenUnset(t *testing.T) {
+	line := `{"action":"call","payload":{"blob":"` + strings.Repeat("x", 128<<10) + `"}}` + "\n"
+	var out bytes.Buffer
+	rt := &Runtime{In: strings.NewReader(line), Out: &out}
+	served := 0
+	if err := rt.Serve(context.Background(), HandlerFunc(func(context.Context, Request, *HostClient) Response {
+		served++
+		return Response{OK: true}
+	})); err != nil {
+		t.Fatalf("a 128 KiB request on a runtime with no limit set was refused: %v", err)
+	}
+	if served != 1 {
+		t.Fatalf("served %d requests, want 1", served)
+	}
+}
+
 func TestServeV2DefaultLimitStillRefusesLargeFrames(t *testing.T) {
 	frame := invokeFrameOfSize(t, DefaultMaxRequestBytes+1)
 	if _, err := decodeInvokeV2(frame, 1, 0); err == nil {

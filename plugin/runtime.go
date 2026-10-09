@@ -253,7 +253,10 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 	if max <= 0 {
 		max = DefaultMaxRequestBytes
 	}
-	scanner.Buffer(make([]byte, 0, 64*1024), max)
+	// bufio.Scanner refuses a line as long as its buffer, so the buffer gets
+	// one byte of headroom: a frame of exactly max bytes reaches the decoder,
+	// which is where the limit is enforced.
+	scanner.Buffer(make([]byte, 0, 64*1024), max+1)
 	ready := struct {
 		Protocol     int      `json:"protocol"`
 		Kind         string   `json:"kind"`
@@ -451,7 +454,11 @@ func (rt *Runtime) Serve(ctx context.Context, handler Handler) error {
 		ctx = context.Background()
 	}
 	scanner := bufio.NewScanner(rt.In)
-	scanner.Buffer(make([]byte, 0, 64*1024), rt.MaxRequestBytes)
+	max := rt.MaxRequestBytes
+	if max <= 0 {
+		max = DefaultMaxRequestBytes
+	}
+	scanner.Buffer(make([]byte, 0, 64*1024), max+1)
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
 			return err

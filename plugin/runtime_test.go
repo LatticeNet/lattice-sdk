@@ -935,3 +935,47 @@ func TestStrictHostResponseFuzzSeeds(t *testing.T) {
 		}
 	}
 }
+
+func TestHostClientStoreAndScheduleMethods(t *testing.T) {
+	responses := strings.Join([]string{
+		`{"host_response":{"id":"h1","ok":true,"result":{}}}`,
+		`{"host_response":{"id":"h2","ok":true,"result":{}}}`,
+		`{"host_response":{"id":"h3","ok":true,"result":{"removed":true}}}`,
+		`{"host_response":{"id":"h4","ok":true,"result":{"removed":false}}}`,
+	}, "\n") + "\n"
+	var out bytes.Buffer
+	host := NewHostClient(HostClientOptions{Output: &out, Responses: strings.NewReader(responses)})
+	ctx := context.Background()
+
+	if err := host.KVDelete(ctx, "record-v2-a"); err != nil {
+		t.Fatalf("KVDelete: %v", err)
+	}
+	schedule := TaskSchedule{ID: "refresh", Cron: "*/15 * * * *", Service: "latticenet.example/subscription", Method: "refresh_all", Payload: json.RawMessage(`{"all":true}`)}
+	if err := host.TaskSchedule(ctx, schedule); err != nil {
+		t.Fatalf("TaskSchedule: %v", err)
+	}
+	if removed, err := host.TaskUnschedule(ctx, "refresh"); err != nil || !removed {
+		t.Fatalf("TaskUnschedule: removed=%v err=%v", removed, err)
+	}
+	if removed, err := host.TaskUnschedule(ctx, "gone"); err != nil || removed {
+		t.Fatalf("TaskUnschedule of a missing id: removed=%v err=%v", removed, err)
+	}
+	for _, want := range []string{
+		`"method":"kv.delete","params":{"key":"record-v2-a"}`,
+		`"method":"task.schedule","params":{"id":"refresh","cron":"*/15 * * * *","service":"latticenet.example/subscription","method":"refresh_all","payload":{"all":true}}`,
+		`"method":"task.unschedule","params":{"id":"refresh"}`,
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("missing %s in output:\n%s", want, out.String())
+		}
+	}
+
+	// A schedule that cannot pass the host's checks never leaves the plugin.
+	before := out.Len()
+	if err := host.TaskSchedule(ctx, TaskSchedule{ID: "fast", Cron: "* * * * *", Service: "latticenet.example/subscription", Method: "refresh_all"}); err == nil {
+		t.Fatal("a one-minute schedule was accepted")
+	}
+	if out.Len() != before {
+		t.Fatalf("a refused schedule was sent to the host:\n%s", out.String()[before:])
+	}
+}

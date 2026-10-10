@@ -37,6 +37,15 @@ const (
 	// MaxSelectionPlanBytes bounds one encoded plan. A 4096-node plan with
 	// Reality and transport options measures 3 to 4 MB.
 	MaxSelectionPlanBytes = 6 << 20
+	// MaxRenderPlanBytes is the largest plan a render reply may carry: the
+	// render stdout budget, which equals MaxSelectionPlanBytes, less the
+	// half MiB the reply's other fields and the framing take. A plugin
+	// refuses a plan over it with plan_too_large rather than letting the core
+	// kill the call at the stdout budget.
+	MaxRenderPlanBytes = MaxSelectionPlanBytes - 512<<10
+	// MaxBindProbeConsecutiveFailures bounds
+	// ProbeExclusionPolicy.ConsecutiveFailures.
+	MaxBindProbeConsecutiveFailures = 10
 	// MaxConvertRequestBytes bounds one encoded convert request, which
 	// carries a bound plan. It is inside MaxSubscriptionRequestBytes.
 	MaxConvertRequestBytes = 6 << 20
@@ -74,6 +83,34 @@ var planPlaceholderField = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 // planPlaceholderBody matches the part of a placeholder after the prefix.
 var planPlaceholderBody = regexp.MustCompile(`^([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})-([a-z][a-z0-9_]{0,31})-([0-9a-f]{32})`)
 
+// The top-level keys of a plan node, by what each side does with them. A
+// plan node carries its catalogue metadata flat, under these names, never in
+// a nested object, because the core admits a node key only from its compared,
+// mutable and carried sets.
+var (
+	// SelectionPlanLatticeFields are the catalogue metadata keys a plan node
+	// carries at the top level: the core carries them without comparing
+	// them, and convert strips them before any producer runs. line_uuid is
+	// not here, because the core compares it with the node's line; convert
+	// strips it with these (SelectionPlanStrippedFields).
+	SelectionPlanLatticeFields = []string{"line_hash_id", "node_id", "geo", "chain", "tags", "groups", "probe", "addresses"}
+
+	// SelectionPlanStrippedFields is what convert removes from every node
+	// before any producer runs: the Lattice fields and line_uuid.
+	SelectionPlanStrippedFields = append([]string{"line_uuid"}, SelectionPlanLatticeFields...)
+
+	// SelectionPlanCarriedFields is the core's whole carried set: the
+	// Lattice fields plus the protocol tuning fields and the parser
+	// annotations the URI parsers set from a template's parameters. The core
+	// carries these keys without comparing them; a node key outside the
+	// core's compared, mutable and carried sets is excluded as
+	// plan_rejected:<key>.
+	SelectionPlanCarriedFields = append([]string{
+		"flow", "packet-encoding", "congestion-controller", "udp-relay-mode", "reduce-rtt", "up", "down",
+		"_h2", "_mode", "_grpc-type", "_spider-x", "_pqv", "_v2ray-http-upgrade-ed",
+	}, SelectionPlanLatticeFields...)
+)
+
 // SelectionPlan is what render returns for a fleet-bound record in place of
 // a document.
 type SelectionPlan struct {
@@ -90,6 +127,90 @@ type SelectionPlan struct {
 	// inlined by render, because convert cannot read the store. The core
 	// passes it to convert unchanged.
 	ResponseChain []ResponseTransformerStep `json:"response_chain,omitempty"`
+	// Selection is the selection the plan was rendered from. A core takes
+	// the selected line set from it in place of the record's snapshot. On
+	// the serve path the core also requires its CatalogueVersion to equal the
+	// snapshot's and its lines to be among the snapshot's rows, refusing
+	// selection_mismatch otherwise, so a plan always says what its snapshot
+	// said. A preview of a staged revision carries the revision's own fresh
+	// selection, which the core uses as it is. Nil in a plan from a plugin
+	// that predates it; the core then reads the snapshot.
+	Selection *PlanSelection `json:"selection,omitempty"`
+	// Policy is the served record's opt-in exclusion rules, which the core
+	// applies when it binds. Nil when the record opts into none.
+	Policy *BindPolicy `json:"policy,omitempty"`
+}
+
+// PlanSelection is the selection a plan was rendered from: the catalogue
+// version and the lines it selected.
+type PlanSelection struct {
+	// CatalogueVersion is the catalogue version the rows were read at.
+	CatalogueVersion string `json:"catalogue_version"`
+	// LineUUIDs are the selected lines: at most MaxSubscriptionRecordNodes,
+	// each a lowercase UUIDv4, none twice.
+	LineUUIDs []string `json:"line_uuids"`
+}
+
+// BindPolicy is a record's opt-in exclusion rules, applied by the core at
+// bind. Every rule is off when its field is absent.
+type BindPolicy struct {
+	// Probe excludes a line whose probe failed too many times in a row.
+	Probe *ProbeExclusionPolicy `json:"probe,omitempty"`
+	// Usage excludes a line on which the share's identity used too much in
+	// its current period.
+	Usage *UsageExclusionPolicy `json:"usage,omitempty"`
+	// DDNSDial says the record dials verified DDNS names in place of a
+	// line's address, so the core's cache key for a share must cover each
+	// name's verification as well.
+	DDNSDial bool `json:"ddns_dial,omitempty"`
+}
+
+// ProbeExclusionPolicy excludes a line whose last probe failed and whose
+// failure count since the last pass is at least ConsecutiveFailures. A line
+// with no probe block is never excluded by it.
+type ProbeExclusionPolicy struct {
+	// ConsecutiveFailures is 1 to MaxBindProbeConsecutiveFailures.
+	ConsecutiveFailures int `json:"consecutive_failures"`
+}
+
+// UsageExclusionPolicy excludes a line on which the share's identity used
+// more than MaxBytesPerLine in its current period: its monthly quota period,
+// or the calendar month when it has none.
+type UsageExclusionPolicy struct {
+	// MaxBytesPerLine is positive. The rule fires strictly above it.
+	MaxBytesPerLine int64 `json:"max_bytes_per_line"`
+}
+
+// Validate checks a selection's version and its line list.
+func (s PlanSelection) Validate() error {
+	if !validCatalogueToken(s.CatalogueVersion) {
+		return errors.New("plan selection needs a catalogue_version")
+	}
+	if len(s.LineUUIDs) > MaxSubscriptionRecordNodes {
+		return fmt.Errorf("plan selection names more than %d lines", MaxSubscriptionRecordNodes)
+	}
+	seen := make(map[string]struct{}, len(s.LineUUIDs))
+	for _, id := range s.LineUUIDs {
+		if !subscriptionSourceUUIDv4.MatchString(id) {
+			return fmt.Errorf("plan selection line_uuid %q is not a lowercase uuidv4", id)
+		}
+		if _, dup := seen[id]; dup {
+			return fmt.Errorf("plan selection names line %s twice", id)
+		}
+		seen[id] = struct{}{}
+	}
+	return nil
+}
+
+// Validate checks a policy's ranges.
+func (p BindPolicy) Validate() error {
+	if p.Probe != nil && (p.Probe.ConsecutiveFailures < 1 || p.Probe.ConsecutiveFailures > MaxBindProbeConsecutiveFailures) {
+		return fmt.Errorf("plan policy probe consecutive_failures must be 1 to %d", MaxBindProbeConsecutiveFailures)
+	}
+	if p.Usage != nil && p.Usage.MaxBytesPerLine <= 0 {
+		return errors.New("plan policy usage max_bytes_per_line must be positive")
+	}
+	return nil
 }
 
 // SelectionPlanNode is one node of a plan.
@@ -204,6 +325,16 @@ func (p SelectionPlan) validate(keysChecked bool) error {
 		}
 		if p.Kind == SelectionPlanKindDocument && node.Provider {
 			return fmt.Errorf("plan node %d: a document plan carries fleet nodes only", i)
+		}
+	}
+	if p.Selection != nil {
+		if err := p.Selection.Validate(); err != nil {
+			return err
+		}
+	}
+	if p.Policy != nil {
+		if err := p.Policy.Validate(); err != nil {
+			return err
 		}
 	}
 	return ValidateResponseChain(p.ResponseChain)

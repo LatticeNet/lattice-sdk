@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -625,6 +627,97 @@ func (c *HostClient) KVPut(ctx context.Context, key string, value []byte) error 
 		ValueBase64 string `json:"value_base64"`
 	}{Key: key, ValueBase64: base64.StdEncoding.EncodeToString(value)})
 	return err
+}
+
+// ErrKVConflict is a conditional kv.put the host refused because the stored
+// value is not the one the caller read: its digest differs from if_match, or
+// the key exists and if_match was empty (a create). The caller reads the key
+// again and decides whether to retry.
+var ErrKVConflict = errors.New("kv_conflict")
+
+// KVConflictCode is the host's refusal of a conditional kv.put. The host's
+// error message starts with it, so a plugin that does not use this client
+// can recognise the refusal too.
+const KVConflictCode = "kv_conflict"
+
+// KVValueDigest is the digest kv.get reports beside a stored value and
+// KVPutIfMatch compares: the lowercase hex SHA-256 of the value's bytes.
+func KVValueDigest(value []byte) string {
+	sum := sha256.Sum256(value)
+	return hex.EncodeToString(sum[:])
+}
+
+// KVGetWithDigest is kv.get returning the stored value's digest beside it,
+// so a caller passes the digest it read straight back to KVPutIfMatch. A
+// host that reports no digest (one older than the compare-and-swap) leaves
+// digest empty, and an empty if_match there is a create, which such a host
+// does not enforce either. found is false, and digest empty, for a missing
+// key. A digest the host reports that does not match the value it sent is an
+// error rather than a value to trust.
+func (c *HostClient) KVGetWithDigest(ctx context.Context, key string) (value []byte, digest string, found bool, err error) {
+	raw, err := c.Call(ctx, HostMethodKVGet, struct {
+		Key string `json:"key"`
+	}{Key: key})
+	if err != nil {
+		return nil, "", false, err
+	}
+	var out struct {
+		OK          bool   `json:"ok"`
+		Value       string `json:"value,omitempty"`
+		ValueBase64 string `json:"value_base64,omitempty"`
+		SHA256      string `json:"sha256,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, "", false, fmt.Errorf("decode kv.get response: %w", err)
+	}
+	if !out.OK {
+		return nil, "", false, nil
+	}
+	value = []byte(out.Value)
+	if out.ValueBase64 != "" {
+		value, err = base64.StdEncoding.DecodeString(out.ValueBase64)
+		if err != nil {
+			return nil, "", false, fmt.Errorf("decode kv.get value_base64: %w", err)
+		}
+	}
+	if out.SHA256 != "" && out.SHA256 != KVValueDigest(value) {
+		return nil, "", false, errors.New("kv.get: the reported sha256 does not match the value")
+	}
+	return value, out.SHA256, true, nil
+}
+
+// KVPutIfMatch is kv.put with the digest of the value the caller last read
+// (KVGetWithDigest). The host writes only when the stored value's digest is
+// ifMatch, and an empty ifMatch writes only when the key does not exist. A
+// refusal is ErrKVConflict, wrapped. The payload always carries if_match,
+// empty included, so the host can tell a create from an unconditional put;
+// a host older than the compare-and-swap ignores the field and writes, which
+// is why a plugin relying on it declares that host as its floor.
+func (c *HostClient) KVPutIfMatch(ctx context.Context, key string, value []byte, ifMatch string) error {
+	if ifMatch != "" && !validKVDigest(ifMatch) {
+		return errors.New("kv.put: if_match must be a lowercase hex sha256")
+	}
+	_, err := c.Call(ctx, HostMethodKVPut, struct {
+		Key         string `json:"key"`
+		ValueBase64 string `json:"value_base64"`
+		IfMatch     string `json:"if_match"`
+	}{Key: key, ValueBase64: base64.StdEncoding.EncodeToString(value), IfMatch: ifMatch})
+	if err != nil && strings.HasPrefix(err.Error(), HostMethodKVPut+": "+KVConflictCode) {
+		return fmt.Errorf("%w: %s", ErrKVConflict, err.Error())
+	}
+	return err
+}
+
+func validKVDigest(digest string) bool {
+	if len(digest) != sha256.Size*2 {
+		return false
+	}
+	for _, r := range digest {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // KVDelete removes key from the plugin's KV namespace. Deleting a key that

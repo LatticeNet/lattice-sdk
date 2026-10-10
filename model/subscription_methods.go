@@ -111,6 +111,10 @@ type RenderReply struct {
 	ZeroNodes bool `json:"zero_nodes,omitempty"`
 	// Plan is a fleet-bound record's selection plan.
 	Plan *SelectionPlan `json:"plan,omitempty"`
+	// LiveRevision is the record's live revision when render ran, whatever
+	// revision the request named. The core checks a plan's from_revision
+	// against it and a staged render is told apart from a live one by it.
+	LiveRevision string `json:"live_revision,omitempty"`
 }
 
 // ConvertRequest is the whole input of convert, which produces one client's

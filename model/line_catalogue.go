@@ -8,6 +8,7 @@ import (
 	"net"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -57,6 +58,20 @@ const (
 	// LinePathBusy: a plan attempt on the path is in progress.
 	LinePathBusy = "busy"
 )
+
+// Service states (LineCatalogueRow.ServiceState and
+// LineCatalogueChain.PathServiceState): the process truth of a line.
+const (
+	LineServiceStateRunning    = "running"
+	LineServiceStateDown       = "down"
+	LineServiceStateRestarting = "restarting"
+	LineServiceStateUnknown    = "unknown"
+)
+
+// LineCatalogueUnavailableProbe names, in LineCatalogueResponse.Unavailable,
+// the probe block: no producer fills it on this core, so every row's probe
+// is null and a predicate over it can only be unknown.
+const LineCatalogueUnavailableProbe = "probe"
 
 // Probe verdicts (LineCatalogueProbe.Verdict).
 const (
@@ -148,6 +163,11 @@ type LineCatalogueRow struct {
 	NodeName string `json:"node_name,omitempty"`
 	// Name is the line's own name.
 	Name string `json:"name,omitempty"`
+	// Label is the entry label the core shows for the line and names its
+	// bind entries by: the node name, then the line's name, tag or hash id.
+	// A consumer names the line's nodes by it as given and never derives it
+	// from Name, which is empty for many lines.
+	Label string `json:"label,omitempty"`
 	// NodeTags are the node's tags.
 	NodeTags []string `json:"node_tags,omitempty"`
 	// GroupIDs are the groups the node belongs to.
@@ -229,6 +249,11 @@ type LineCatalogueDDNSName struct {
 	// address at the last template sync. Only a verified name may stand in
 	// for a line's dial address.
 	Verified bool `json:"verified,omitempty"`
+	// Target is the host a cname-type profile's name points at, set when the
+	// name is verified by resolving to that host's addresses. A line behind
+	// NAT may be dialled only by a verified name whose Target is its provider
+	// edge.
+	Target string `json:"target,omitempty"`
 }
 
 // LineCatalogueChain places a line in a chain.
@@ -247,6 +272,14 @@ type LineCatalogueChain struct {
 	// node geo, replaced by the probe's measured exit location when one
 	// exists. Geo predicates read it in place of the row's Geo.
 	ExitGeo *NodeGeo `json:"exit_geo,omitempty"`
+	// Unresolved is set on a relay whose outbound resolves to no fleet line.
+	// Such a relay's exit is unknown, so its effective geo is unknown too: a
+	// geo predicate never reads the row's own Geo in its place.
+	Unresolved bool `json:"unresolved,omitempty"`
+	// PathServiceState is the worst service state along the line's
+	// single-successor path (down, then restarting, then unknown, then
+	// running), empty when the line has no path.
+	PathServiceState string `json:"path_service_state,omitempty"`
 }
 
 // LineCatalogueProbe is a line's last probe verdict, derived by the core from
@@ -366,6 +399,10 @@ type LineCatalogueResponse struct {
 	// SelectorFields lists the selector fields, by JSON name, that this core
 	// evaluates. The first page carries it.
 	SelectorFields []string `json:"selector_fields,omitempty"`
+	// Unavailable names the row blocks this core never fills, such as
+	// LineCatalogueUnavailableProbe. A predicate over one is unknown on every
+	// row, so a consumer offers none and saves none.
+	Unavailable []string `json:"unavailable,omitempty"`
 }
 
 // Validate checks a row's shape: its identity, its enums, its addresses, that
@@ -409,7 +446,7 @@ func (r LineCatalogueRow) validateFields() error {
 			return fmt.Errorf("line catalogue row %s: invalid %s", r.LineUUID, name)
 		}
 	}
-	for _, value := range []string{r.NodeName, r.Name, r.PublicHost, r.ProviderEdge} {
+	for _, value := range []string{r.NodeName, r.Name, r.Label, r.PublicHost, r.ProviderEdge} {
 		if len(value) > MaxSubscriptionURIBytes {
 			return fmt.Errorf("line catalogue row %s: text exceeds %d bytes", r.LineUUID, MaxSubscriptionURIBytes)
 		}
@@ -432,6 +469,10 @@ func (r LineCatalogueRow) validateFields() error {
 	for _, ddns := range r.DDNSNames {
 		if net.ParseIP(ddns.Name) != nil || !validSubscriptionHost(ddns.Name) || numericAddressName(ddns.Name) {
 			return fmt.Errorf("line catalogue row %s: invalid ddns name %q", r.LineUUID, ddns.Name)
+		}
+		if ddns.Target != "" && (len(ddns.Target) > MaxSubscriptionURIBytes || !validTemplateText(ddns.Target, 253) ||
+			strings.TrimSpace(ddns.Target) != ddns.Target || strings.ContainsAny(ddns.Target, "/@?#[] ")) {
+			return fmt.Errorf("line catalogue row %s: invalid ddns target for %q", r.LineUUID, ddns.Name)
 		}
 	}
 	if err := r.Chain.Validate(); err != nil {
@@ -556,6 +597,11 @@ func (c LineCatalogueChain) Validate() error {
 	}
 	if c.DownstreamLineUUID != "" && !subscriptionSourceUUIDv4.MatchString(c.DownstreamLineUUID) {
 		return errors.New("chain downstream_line_uuid must be a lowercase uuidv4")
+	}
+	switch c.PathServiceState {
+	case "", LineServiceStateRunning, LineServiceStateDown, LineServiceStateRestarting, LineServiceStateUnknown:
+	default:
+		return fmt.Errorf("invalid chain path_service_state %q", c.PathServiceState)
 	}
 	return nil
 }
@@ -704,6 +750,91 @@ func (s LineCatalogueSelector) UnsupportedFields(advertised []string) []string {
 	return out
 }
 
+// LineCatalogueSelectorMatches reports whether a row passes every selector
+// field but the line list. It is the pushdown contract as one function: a
+// core evaluates a pushed selector with it and a plugin that runs a
+// predicate itself calls it, so the two cannot disagree. A nil selector
+// matches every row. The line list is the caller's: a selector that names
+// lines selects those lines, in its own order, and then applies this.
+//
+//   - countries, regions, protocols, transports and service_states compare
+//     with Unicode case folding (strings.EqualFold); an empty row value never
+//     matches.
+//   - node_tags, group_ids and chain_roles compare exactly.
+//   - country and region read the row's effective geo: the chain's exit geo
+//     when it has one, else the node's. A field the exit geo lacks does not
+//     fall back to the node's geo. A relay whose chain is Unresolved has an
+//     unknown geo, so country and region never match it, whatever its own
+//     Geo says.
+//   - renewal_within_days matches a known renewal at or before now plus the
+//     window, so a renewal already past matches.
+//   - probe_passed_within_hours matches a pass at or after now minus the
+//     window; a null probe block never matches.
+func LineCatalogueSelectorMatches(row *LineCatalogueRow, sel *LineCatalogueSelector, now time.Time) bool {
+	if sel == nil {
+		return true
+	}
+	geo := row.Geo
+	if row.Chain.ExitGeo != nil {
+		geo = row.Chain.ExitGeo
+	}
+	if row.Chain.Unresolved {
+		geo = nil
+	}
+	switch {
+	case len(sel.Countries) > 0 && (geo == nil || !lineCatalogueHasFold(sel.Countries, geo.Country)):
+		return false
+	case len(sel.Regions) > 0 && (geo == nil || !lineCatalogueHasFold(sel.Regions, geo.Region)):
+		return false
+	case len(sel.Protocols) > 0 && !lineCatalogueHasFold(sel.Protocols, row.Protocol):
+		return false
+	case len(sel.Transports) > 0 && !lineCatalogueHasFold(sel.Transports, row.Transport):
+		return false
+	case len(sel.ServiceStates) > 0 && !lineCatalogueHasFold(sel.ServiceStates, row.ServiceState):
+		return false
+	case len(sel.ChainRoles) > 0 && !slices.Contains(sel.ChainRoles, row.Chain.Role):
+		return false
+	case len(sel.NodeTags) > 0 && !lineCatalogueAny(sel.NodeTags, row.NodeTags):
+		return false
+	case len(sel.GroupIDs) > 0 && !lineCatalogueAny(sel.GroupIDs, row.GroupIDs):
+		return false
+	}
+	if sel.RenewalWithinDays != nil {
+		if row.Machine == nil || row.Machine.NextRenewal.IsZero() ||
+			row.Machine.NextRenewal.After(now.Add(time.Duration(*sel.RenewalWithinDays)*24*time.Hour)) {
+			return false
+		}
+	}
+	if sel.ProbePassedWithinHours != nil {
+		if row.Probe == nil || row.Probe.Verdict != LineProbeVerdictPass ||
+			row.Probe.At.Before(now.Add(-time.Duration(*sel.ProbePassedWithinHours)*time.Hour)) {
+			return false
+		}
+	}
+	return true
+}
+
+func lineCatalogueHasFold(values []string, value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, v := range values {
+		if strings.EqualFold(v, value) {
+			return true
+		}
+	}
+	return false
+}
+
+func lineCatalogueAny(wanted, have []string) bool {
+	for _, w := range wanted {
+		if slices.Contains(have, w) {
+			return true
+		}
+	}
+	return false
+}
+
 // Validate checks a catalogue request.
 func (r LineCatalogueRequest) Validate() error {
 	if r.IdentityID != "" && !validCatalogueID(r.IdentityID) {
@@ -762,6 +893,11 @@ func (r LineCatalogueResponse) Validate() error {
 	for _, name := range r.SelectorFields {
 		if !validCatalogueID(name) {
 			return errors.New("catalogue page advertises an invalid selector field")
+		}
+	}
+	for _, name := range r.Unavailable {
+		if !validCatalogueID(name) {
+			return errors.New("catalogue page names an invalid unavailable block")
 		}
 	}
 	seen := make(map[string]struct{}, len(r.Rows))

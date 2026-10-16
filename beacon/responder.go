@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"hash/maphash"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -97,8 +98,11 @@ func (v Verdict) String() string {
 // SetTable and LastAuthenticated may be called from any goroutine while
 // Handle runs.
 type Responder struct {
-	startNs  int64
-	table    atomic.Pointer[responderTable]
+	startNs int64
+	table   atomic.Pointer[responderTable]
+	// setMu serializes SetTable, so two refreshes cannot both start from
+	// the same old table and hand one source a fresh nonce cache.
+	setMu    sync.Mutex
 	lastAuth atomic.Int64
 	// sum is Handle's scratch for an HMAC digest, kept here so a drop
 	// allocates nothing.
@@ -153,6 +157,8 @@ var ErrTable = errors.New("beacon: invalid table")
 // hold at most MaxEpochsPerSource epochs; a retired one only ever answers
 // StatusUnknownEpoch.
 func (r *Responder) SetTable(entries []TableEntry) error {
+	r.setMu.Lock()
+	defer r.setMu.Unlock()
 	old := r.table.Load()
 	byID := map[uint32]*tableSource{}
 	for _, e := range entries {
@@ -197,8 +203,11 @@ func (r *Responder) SetTable(entries []TableEntry) error {
 	return nil
 }
 
-// LastAuthenticated is when a datagram's tag last verified, zero before the
-// first one. An agent reports it as the beacon's last authenticated request.
+// LastAuthenticated is when the responder last took a fresh, new request
+// whose tag verified (answered ok or rate limited), zero before the first.
+// A stale, replayed or retired-epoch datagram does not move it, so a
+// captured request replayed later cannot keep it fresh. An agent reports it
+// as the beacon's last authenticated request.
 func (r *Responder) LastAuthenticated() time.Time {
 	ns := r.lastAuth.Load()
 	if ns == 0 {
@@ -265,43 +274,45 @@ func (r *Responder) Handle(now time.Time, pkt, out []byte) (int, Verdict) {
 		return 0, DropBadTag
 	}
 	nowNs := now.UnixNano()
-	r.lastAuth.Store(nowNs)
 	st := src.state
 	seq := binary.BigEndian.Uint32(pkt[reqOffSeq:])
-	nonce := pkt[reqOffNonce:reqOffPad]
+	// The nonce is copied out of pkt, so a caller that reuses its read
+	// buffer as out still gets the request's nonce back.
+	var n [NonceLen]byte
+	copy(n[:], pkt[reqOffNonce:reqOffPad])
 	if ep.retired {
-		return r.named(st, ep, nowNs, StatusUnknownEpoch, seq, nonce, out)
+		return r.named(st, ep, nowNs, StatusUnknownEpoch, seq, &n, out)
 	}
 	sent := int64(binary.BigEndian.Uint64(pkt[reqOffSent:]))
 	if sent < r.startNs || nowNs-sent > int64(FreshnessWindow) || sent-nowNs > int64(FreshnessWindow) {
-		return r.named(st, ep, nowNs, StatusStale, seq, nonce, out)
+		return r.named(st, ep, nowNs, StatusStale, seq, &n, out)
 	}
 	if st.nonces == nil {
 		st.nonces = NewNonceCache()
 	}
-	var n [NonceLen]byte
-	copy(n[:], nonce)
 	if st.nonces.Seen(&n, nowNs) {
 		return 0, DropReplay
 	}
+	r.lastAuth.Store(nowNs)
 	// Inserted before the rate decision, so a request refused for rate
-	// cannot be replayed later and answered.
-	if !st.nonces.Insert(&n, sent+int64(FreshnessWindow), nowNs) {
-		return r.named(st, ep, nowNs, StatusRateLimited, seq, nonce, out)
+	// cannot be replayed later and answered. It is held one nanosecond past
+	// the last instant its request is still fresh.
+	if !st.nonces.Insert(&n, sent+int64(FreshnessWindow)+1, nowNs) {
+		return r.named(st, ep, nowNs, StatusRateLimited, seq, &n, out)
 	}
 	if !st.allow(nowNs) {
-		return r.named(st, ep, nowNs, StatusRateLimited, seq, nonce, out)
+		return r.named(st, ep, nowNs, StatusRateLimited, seq, &n, out)
 	}
-	writeReply(out[:ReplyLen], ep.mac, StatusOK, seq, nonce, nowNs, r.sum[:0])
+	writeReply(out[:ReplyLen], ep.mac, StatusOK, seq, n[:], nowNs, r.sum[:0])
 	return ReplyLen, ReplyOK
 }
 
-func (r *Responder) named(st *sourceState, ep *tableEpoch, nowNs int64, status Status, seq uint32, nonce, out []byte) (int, Verdict) {
+func (r *Responder) named(st *sourceState, ep *tableEpoch, nowNs int64, status Status, seq uint32, nonce *[NonceLen]byte, out []byte) (int, Verdict) {
 	if st.lastNamed != 0 && nowNs-st.lastNamed < int64(NamedReplyInterval) && nowNs >= st.lastNamed {
 		return 0, DropNamedBudget
 	}
 	st.lastNamed = nowNs
-	writeReply(out[:ReplyLen], ep.mac, status, seq, nonce, nowNs, r.sum[:0])
+	writeReply(out[:ReplyLen], ep.mac, status, seq, nonce[:], nowNs, r.sum[:0])
 	switch status {
 	case StatusStale:
 		return ReplyLen, ReplyStale

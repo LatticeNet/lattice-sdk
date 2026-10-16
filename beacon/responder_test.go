@@ -3,6 +3,7 @@ package beacon
 import (
 	"bytes"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
@@ -408,5 +409,92 @@ func TestVerdictClasses(t *testing.T) {
 		if s.String() == "invalid" {
 			t.Errorf("status %d has no name", s)
 		}
+	}
+}
+
+// A replayed, stale or retired datagram does not move "last authenticated":
+// only a fresh, new request does.
+func TestLastAuthenticatedCountsOnlyFreshRequests(t *testing.T) {
+	f := newFixture(t)
+	now := t0.Add(time.Minute)
+	pkt := f.request(t, now)
+	if _, v := f.handle(now, pkt); v != ReplyOK {
+		t.Fatal(v)
+	}
+	first := f.r.LastAuthenticated()
+	later := now.Add(10 * time.Second)
+	if _, v := f.handle(later, pkt); v != DropReplay {
+		t.Fatal(v)
+	}
+	if _, v := f.handle(later.Add(2*time.Minute), pkt); v != ReplyStale {
+		t.Fatal(v)
+	}
+	if !f.r.LastAuthenticated().Equal(first) {
+		t.Fatalf("a replay moved last authenticated to %v", f.r.LastAuthenticated())
+	}
+}
+
+// At the exact last instant a request is fresh, its replay is still caught.
+func TestReplayCaughtAtTheWindowEdge(t *testing.T) {
+	f := newFixture(t)
+	sent := t0.Add(time.Minute)
+	pkt := f.request(t, sent)
+	if _, v := f.handle(sent, pkt); v != ReplyOK {
+		t.Fatal(v)
+	}
+	if _, v := f.handle(sent.Add(FreshnessWindow), pkt); v != DropReplay {
+		t.Fatalf("a replay at the window edge: %v", v)
+	}
+}
+
+// A caller may reuse its read buffer for the reply.
+func TestReplyMayReuseTheReadBuffer(t *testing.T) {
+	f := newFixture(t)
+	now := t0.Add(time.Minute)
+	buf := make([]byte, ReadBufferLen)
+	pkt := f.request(t, now)
+	copy(buf, pkt)
+	req, _ := ParseRequest(pkt)
+	n, v := f.r.Handle(now, buf[:RequestLen], buf)
+	if v != ReplyOK {
+		t.Fatal(v)
+	}
+	got, err := ParseReply(buf[:n], &f.key)
+	if err != nil || got.Nonce != req.Nonce || got.Seq != req.Seq {
+		t.Fatalf("reply from a shared buffer = %+v, %v", got, err)
+	}
+}
+
+// SetTable may run beside Handle and beside itself (run with -race).
+func TestSetTableConcurrentWithHandle(t *testing.T) {
+	f := newFixture(t)
+	now := t0.Add(time.Minute)
+	entries := []TableEntry{{SourceID: 3, Epoch: 7, Key: f.key}}
+	var wg sync.WaitGroup
+	for g := 0; g < 4; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 200; i++ {
+				if err := f.r.SetTable(entries); err != nil {
+					t.Error(err)
+					return
+				}
+				_ = f.r.LastAuthenticated()
+			}
+		}()
+	}
+	out := make([]byte, ReplyLen)
+	for i := 0; i < 400; i++ {
+		at := now.Add(time.Duration(i) * 60 * time.Millisecond)
+		f.r.Handle(at, f.request(t, at), out)
+	}
+	wg.Wait()
+	pkt := f.request(t, now.Add(time.Minute))
+	if _, v := f.handle(now.Add(time.Minute), pkt); v != ReplyOK {
+		t.Fatal(v)
+	}
+	if _, v := f.handle(now.Add(time.Minute), pkt); v != DropReplay {
+		t.Fatalf("concurrent table refreshes reset the replay cache: %v", v)
 	}
 }

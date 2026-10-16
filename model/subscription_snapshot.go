@@ -73,7 +73,7 @@ func (s *SubscriptionSnapshot) UnmarshalJSON(raw []byte) error {
 		}
 		decoder := json.NewDecoder(bytes.NewReader(raw))
 		decoder.DisallowUnknownFields()
-		decoded = snapshotWire{}
+		decoded = wire{}
 		if err := decoder.Decode(&decoded); err != nil {
 			return err
 		}
@@ -133,8 +133,10 @@ func (s *SubscriptionSnapshot) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-// snapshotWire is a snapshot as it is encoded.
-type snapshotWire struct {
+// wire is a snapshot as it is encoded. It keeps the name of the local type
+// the strict decode used before the one-pass read, because encoding/json
+// names the type in its errors (model.wire.raw) and callers saw those words.
+type wire struct {
 	SchemaVersion  int             `json:"schema_version"`
 	PluginID       string          `json:"plugin_id"`
 	SubscriptionID string          `json:"subscription_id"`
@@ -150,17 +152,17 @@ type snapshotWire struct {
 
 // decodeSnapshotWireFast is UnmarshalJSON's strict decode for the plain
 // case: a snapshot strictjson reads in one pass whose members are named
-// exactly as snapshotWire's, decoded member by member, with the member map
+// exactly as wire's, decoded member by member, with the member map
 // the checks below read built from the same pass. A snapshot carries a raw
 // of up to several MiB, which the strict decode and the member map each
 // scanned again. ok is false for anything else, and the caller runs the
 // strict decode, which decides and words every error.
-func decodeSnapshotWireFast(raw []byte) (snapshotWire, map[string]json.RawMessage, bool) {
+func decodeSnapshotWireFast(raw []byte) (wire, map[string]json.RawMessage, bool) {
 	members, ok := strictjson.Fields(raw)
 	if !ok {
-		return snapshotWire{}, nil, false
+		return wire{}, nil, false
 	}
-	var w snapshotWire
+	var w wire
 	fields := make(map[string]json.RawMessage, len(members))
 	for _, f := range members {
 		var target any
@@ -188,14 +190,14 @@ func decodeSnapshotWireFast(raw []byte) (snapshotWire, map[string]json.RawMessag
 		case "stale":
 			target = &w.Stale
 		default:
-			return snapshotWire{}, nil, false
+			return wire{}, nil, false
 		}
 		if str, isString := target.(*string); isString {
 			if !strictjson.StringInto(f.Value, str) {
-				return snapshotWire{}, nil, false
+				return wire{}, nil, false
 			}
 		} else if target != nil && json.Unmarshal(f.Value, target) != nil {
-			return snapshotWire{}, nil, false
+			return wire{}, nil, false
 		}
 		fields[f.Key] = f.Value
 	}

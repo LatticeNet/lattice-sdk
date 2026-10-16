@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/LatticeNet/lattice-sdk/strictjson"
 )
 
 // A fleet-bound record (design 28) renders to a SelectionPlan instead of a
@@ -440,5 +442,5 @@ func DecodeSelectionPlan(raw []byte) (SelectionPlan, error) {
 
 func isJSONObject(raw json.RawMessage) bool {
 	trimmed := bytes.TrimSpace(raw)
-	return len(trimmed) > 0 && trimmed[0] == '{' && json.Valid(trimmed)
+	return len(trimmed) > 0 && trimmed[0] == '{' && (strictjson.Valid(trimmed) || json.Valid(trimmed))
 }

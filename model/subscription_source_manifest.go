@@ -13,6 +13,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	"github.com/LatticeNet/lattice-sdk/strictjson"
 )
 
 const (
@@ -287,7 +289,15 @@ func validSubscriptionHost(value string) bool {
 	return true
 }
 
+// rejectDuplicateJSONFields refuses raw unless it is one JSON value with no
+// duplicate key in any object, and nothing after it. strictjson.Valid admits
+// the well-formed case in one pass without allocating; anything it refuses
+// is judged by the token walk below, which is the specification and words
+// every error.
 func rejectDuplicateJSONFields(raw []byte) error {
+	if strictjson.Valid(raw) {
+		return nil
+	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	if err := scanJSONValue(decoder); err != nil {
 		return err

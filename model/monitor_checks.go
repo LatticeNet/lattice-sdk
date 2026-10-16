@@ -341,11 +341,12 @@ var monitorMetadataPrefixes = []netip.Prefix{
 // monitorRefusedPrefixes are private, shared and reserved IPv4 ranges that
 // netip's predicates do not name.
 var monitorRefusedPrefixes = []netip.Prefix{
-	netip.MustParsePrefix("0.0.0.0/8"),     // "this network"
-	netip.MustParsePrefix("100.64.0.0/10"), // carrier-grade NAT, RFC 6598
-	netip.MustParsePrefix("192.0.0.0/24"),  // IETF protocol assignments, RFC 6890
-	netip.MustParsePrefix("198.18.0.0/15"), // benchmarking, RFC 2544
-	netip.MustParsePrefix("240.0.0.0/4"),   // reserved, RFC 1112, broadcast included
+	netip.MustParsePrefix("0.0.0.0/8"),      // "this network"
+	netip.MustParsePrefix("100.64.0.0/10"),  // carrier-grade NAT, RFC 6598
+	netip.MustParsePrefix("192.0.0.0/24"),   // IETF protocol assignments, RFC 6890
+	netip.MustParsePrefix("192.88.99.0/24"), // 6to4 relay anycast, deprecated, RFC 7526
+	netip.MustParsePrefix("198.18.0.0/15"),  // benchmarking, RFC 2544
+	netip.MustParsePrefix("240.0.0.0/4"),    // reserved, RFC 1112, broadcast included
 }
 
 // IPv6 forms that carry or reach IPv4 space. The first three are judged by
@@ -359,6 +360,7 @@ var (
 		netip.MustParsePrefix("::/96"),          // IPv4-compatible, deprecated
 		netip.MustParsePrefix("fec0::/10"),      // site-local, deprecated
 		netip.MustParsePrefix("2001::/32"),      // Teredo
+		netip.MustParsePrefix("100::/64"),       // discard-only, RFC 6666
 	}
 )
 

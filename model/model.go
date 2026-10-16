@@ -1758,7 +1758,9 @@ type MonitorResult struct {
 	Error     string    `json:"error,omitempty"`
 	// CertNotAfter is the leaf certificate expiry a tls probe read, set
 	// whenever the handshake completed, whether or not the probe passed.
-	CertNotAfter time.Time `json:"cert_not_after,omitempty"`
+	// It is absent from the wire otherwise (omitzero: omitempty never
+	// omits a struct, so a tcp result used to carry year 1).
+	CertNotAfter time.Time `json:"cert_not_after,omitzero"`
 	Sent         int       `json:"sent,omitempty"`
 	Lost         int       `json:"lost,omitempty"`
 	RTTsMs       []float64 `json:"rtts_ms,omitempty"`

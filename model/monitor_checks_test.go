@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseMonitorStatusSet(t *testing.T) {
@@ -204,5 +205,62 @@ func TestM2aFieldsOmittedUntilSet(t *testing.T) {
 	}
 	if len(upd.Headers) != 2 || upd.Headers[1].Op != MonitorHeaderSet || !upd.Headers[1].Secret || upd.Packets != nil {
 		t.Fatalf("update = %+v", upd)
+	}
+}
+
+// IPv6 forms that embed or reach a special IPv4 address are judged by that
+// address or refused outright, so a name with such an AAAA record cannot
+// reach the metadata service from a node behind NAT64.
+func TestMonitorDestinationRefusedEmbeddedForms(t *testing.T) {
+	for _, tc := range []struct {
+		addr    string
+		refused bool
+		why     string
+	}{
+		{"64:ff9b::a9fe:a9fe", true, "NAT64 form of the metadata address"},
+		{"64:ff9b::a00:1", true, "NAT64 form of 10.0.0.1"},
+		{"64:ff9b::7f00:1", true, "NAT64 form of loopback"},
+		{"64:ff9b::808:808", false, "NAT64 form of a public address"},
+		{"2002:7f00:1::", true, "6to4 form of loopback"},
+		{"2002:a9fe:a9fe::1", true, "6to4 form of the metadata address"},
+		{"2002:808:808::1", false, "6to4 form of a public address"},
+		{"::7f00:1", true, "IPv4-compatible"},
+		{"::808:808", true, "IPv4-compatible, even of a public address"},
+		{"::ffff:0:10.0.0.1", true, "IPv4-translated form of 10.0.0.1"},
+		{"::ffff:0:8.8.8.8", false, "IPv4-translated form of a public address"},
+		{"::ffff:10.0.0.1", true, "IPv4-mapped"},
+		{"fec0::1", true, "site-local"},
+		{"2001::1", true, "Teredo"},
+		{"2001:0:4136:e378:8000:63bf:3fff:fdd2", true, "Teredo"},
+		{"64:ff9b:1::808:808", true, "local-use NAT64"},
+		{"100::1", true, "discard-only"},
+		{"192.0.0.8", true, "IETF protocol assignments"},
+		{"192.88.99.1", true, "6to4 relay anycast"},
+		{"198.18.0.1", true, "benchmarking"},
+		{"240.0.0.1", true, "reserved"},
+		{"255.255.255.255", true, "broadcast"},
+		{"2606:4700:4700::1111", false, "global unicast"},
+		{"2001:4860:4860::8888", false, "global unicast outside Teredo"},
+	} {
+		if got := MonitorDestinationRefused(netip.MustParseAddr(tc.addr)); got != tc.refused {
+			t.Errorf("%s (%s): refused = %v, want %v", tc.addr, tc.why, got, tc.refused)
+		}
+	}
+}
+
+// A result that read no certificate carries no cert_not_after key, so a
+// console never reads year 1 as an expiry.
+func TestMonitorResultOmitsZeroCertificate(t *testing.T) {
+	raw, err := json.Marshal(MonitorResult{MonitorID: "mon_x", NodeID: "n1", Success: true, LatencyMs: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "cert_not_after") {
+		t.Fatalf("a tcp result carries cert_not_after: %s", raw)
+	}
+	at := time.Date(2027, 1, 2, 3, 4, 5, 0, time.UTC)
+	raw, _ = json.Marshal(MonitorResult{MonitorID: "mon_t", CertNotAfter: at})
+	if !strings.Contains(string(raw), `"cert_not_after":"2027-01-02T03:04:05Z"`) {
+		t.Fatalf("a tls result lost its expiry: %s", raw)
 	}
 }

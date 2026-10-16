@@ -338,23 +338,42 @@ var monitorMetadataPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("fd00:ec2::254/128"),
 }
 
-// monitorRefusedPrefixes are private and shared ranges that netip's
-// predicates do not name: carrier-grade NAT and "this network".
+// monitorRefusedPrefixes are private, shared and reserved IPv4 ranges that
+// netip's predicates do not name.
 var monitorRefusedPrefixes = []netip.Prefix{
-	netip.MustParsePrefix("0.0.0.0/8"),
-	netip.MustParsePrefix("100.64.0.0/10"),
-	netip.MustParsePrefix("255.255.255.255/32"),
+	netip.MustParsePrefix("0.0.0.0/8"),     // "this network"
+	netip.MustParsePrefix("100.64.0.0/10"), // carrier-grade NAT, RFC 6598
+	netip.MustParsePrefix("192.0.0.0/24"),  // IETF protocol assignments, RFC 6890
+	netip.MustParsePrefix("198.18.0.0/15"), // benchmarking, RFC 2544
+	netip.MustParsePrefix("240.0.0.0/4"),   // reserved, RFC 1112, broadcast included
 }
+
+// IPv6 forms that carry or reach IPv4 space. The first three are judged by
+// the IPv4 address they embed; the others are refused outright.
+var (
+	monitorNAT64WellKnown = netip.MustParsePrefix("64:ff9b::/96")    // RFC 6052, last 32 bits
+	monitorIPv4Translated = netip.MustParsePrefix("::ffff:0:0:0/96") // RFC 2765, last 32 bits
+	monitorSixToFour      = netip.MustParsePrefix("2002::/16")       // RFC 3056, bits 16 to 47
+	monitorTransitionDeny = []netip.Prefix{
+		netip.MustParsePrefix("64:ff9b:1::/48"), // local-use NAT64, RFC 8215
+		netip.MustParsePrefix("::/96"),          // IPv4-compatible, deprecated
+		netip.MustParsePrefix("fec0::/10"),      // site-local, deprecated
+		netip.MustParsePrefix("2001::/32"),      // Teredo
+	}
+)
 
 // MonitorDestinationRefused reports whether an agent must refuse to dial
 // addr for a check whose target is not a node reference (Monitor.TargetNode
 // empty): loopback, link-local, cloud metadata, multicast, private
-// (RFC 1918, fc00::/7), carrier-grade NAT, unspecified and broadcast
-// addresses. An IPv4-mapped IPv6 address is judged as its IPv4 address. An
-// agent resolves a host name once, judges every address it got, and dials
-// only an address it judged.
+// (RFC 1918, fc00::/7), carrier-grade NAT, reserved, benchmarking,
+// unspecified and broadcast addresses, and IPv6 transition forms that reach
+// IPv4 space (NAT64, 6to4 and IPv4-translated addresses judged by the IPv4
+// address they embed; local-use NAT64, IPv4-compatible, site-local and
+// Teredo refused). An IPv4-mapped address is judged as its IPv4 address and
+// a zone never changes the verdict. An agent resolves a host name once,
+// judges every address it got, and dials only an address it judged.
 func MonitorDestinationRefused(addr netip.Addr) bool {
-	addr = addr.Unmap()
+	addr = addr.Unmap().WithZone("")
 	if !addr.IsValid() || addr.IsUnspecified() || addr.IsLoopback() || addr.IsMulticast() ||
 		addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() || addr.IsInterfaceLocalMulticast() ||
 		addr.IsPrivate() {
@@ -365,10 +384,28 @@ func MonitorDestinationRefused(addr netip.Addr) bool {
 			return true
 		}
 	}
-	for _, p := range monitorRefusedPrefixes {
+	if addr.Is4() {
+		for _, p := range monitorRefusedPrefixes {
+			if p.Contains(addr) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, p := range monitorTransitionDeny {
 		if p.Contains(addr) {
 			return true
 		}
 	}
-	return false
+	b := addr.As16()
+	var embedded [4]byte
+	switch {
+	case monitorNAT64WellKnown.Contains(addr), monitorIPv4Translated.Contains(addr):
+		copy(embedded[:], b[12:16])
+	case monitorSixToFour.Contains(addr):
+		copy(embedded[:], b[2:6])
+	default:
+		return false
+	}
+	return MonitorDestinationRefused(netip.AddrFrom4(embedded))
 }

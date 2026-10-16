@@ -57,6 +57,10 @@ func decodeMembers(members map[string][]byte, targets map[string]any) bool {
 		switch t := target.(type) {
 		case *json.RawMessage:
 			*t = append(json.RawMessage(nil), value...)
+		case *string:
+			if !strictjson.StringInto(value, t) {
+				return false
+			}
 		default:
 			if json.Unmarshal(value, target) != nil {
 				return false

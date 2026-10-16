@@ -190,7 +190,11 @@ func decodeSnapshotWireFast(raw []byte) (snapshotWire, map[string]json.RawMessag
 		default:
 			return snapshotWire{}, nil, false
 		}
-		if target != nil && json.Unmarshal(f.Value, target) != nil {
+		if str, isString := target.(*string); isString {
+			if !strictjson.StringInto(f.Value, str) {
+				return snapshotWire{}, nil, false
+			}
+		} else if target != nil && json.Unmarshal(f.Value, target) != nil {
 			return snapshotWire{}, nil, false
 		}
 		fields[f.Key] = f.Value

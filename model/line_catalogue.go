@@ -1053,11 +1053,17 @@ func readLineCataloguePageFast(raw []byte) (ReceivedLineCataloguePage, bool) {
 			}
 			page.Rows = make([]LineCatalogueRow, len(elements))
 			page.RowBytes = make([]int, len(elements))
-			for i, element := range elements {
-				if err := json.Unmarshal(element, &page.Rows[i]); err != nil {
+			failed := make([]bool, len(elements))
+			// Rows decode independently, so a full page decodes in
+			// parallel.
+			eachIndex(len(elements), func(i int) {
+				failed[i] = json.Unmarshal(elements[i], &page.Rows[i]) != nil
+				page.RowBytes[i] = len(elements[i])
+			})
+			for _, f := range failed {
+				if f {
 					return ReceivedLineCataloguePage{}, false
 				}
-				page.RowBytes[i] = len(element)
 			}
 		}
 		if err != nil {

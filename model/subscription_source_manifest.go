@@ -302,13 +302,15 @@ func validateSubscriptionText(name, value string, required bool) error {
 }
 
 func validSubscriptionHost(value string) bool {
-	if ip := net.ParseIP(value); ip != nil {
-		return ip.String() == value
+	if ipLiteralBytes(value) {
+		if ip := net.ParseIP(value); ip != nil {
+			return ip.String() == value
+		}
 	}
 	if len(value) == 0 || len(value) > 253 || value != strings.ToLower(value) || strings.HasPrefix(value, ".") || strings.HasSuffix(value, ".") {
 		return false
 	}
-	for _, label := range strings.Split(value, ".") {
+	for label := range strings.SplitSeq(value, ".") {
 		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
 			return false
 		}
@@ -316,6 +318,22 @@ func validSubscriptionHost(value string) bool {
 			if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
 				return false
 			}
+		}
+	}
+	return true
+}
+
+// ipLiteralBytes reports whether every byte of value can occur in an address
+// net.ParseIP accepts: digits, hex letters, dots and colons (it refuses a
+// zone). A value with any other byte, which every host name with a letter
+// past f has, is no address, so callers skip the parse, which allocates an
+// error for each host name it refuses.
+func ipLiteralBytes(value string) bool {
+	for i := 0; i < len(value); i++ {
+		switch b := value[i]; {
+		case b >= '0' && b <= '9', b >= 'a' && b <= 'f', b >= 'A' && b <= 'F', b == '.', b == ':':
+		default:
+			return false
 		}
 	}
 	return true

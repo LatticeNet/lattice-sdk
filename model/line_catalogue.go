@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/LatticeNet/lattice-sdk/strictjson"
 )
@@ -504,7 +505,7 @@ func (r LineCatalogueRow) validateFields() error {
 		}
 	}
 	for _, ddns := range r.DDNSNames {
-		if net.ParseIP(ddns.Name) != nil || !validSubscriptionHost(ddns.Name) || numericAddressName(ddns.Name) {
+		if (ipLiteralBytes(ddns.Name) && net.ParseIP(ddns.Name) != nil) || !validSubscriptionHost(ddns.Name) || numericAddressName(ddns.Name) {
 			return fmt.Errorf("line catalogue row %s: invalid ddns name %q", r.LineUUID, ddns.Name)
 		}
 		if ddns.Target != "" && (len(ddns.Target) > MaxSubscriptionURIBytes || !validTemplateText(ddns.Target, 253) ||
@@ -622,7 +623,60 @@ func credentialName(name string) bool {
 // sensitiveCatalogueText reports whether a value looks like a sealed secret,
 // a private key or a URL, none of which a credential-free row carries.
 func sensitiveCatalogueText(value string) bool {
-	return strings.Contains(value, "://") || strings.Contains(strings.ToUpper(value), "PRIVATE KEY") || strings.HasPrefix(value, "lat$")
+	return strings.Contains(value, "://") || containsPrivateKey(value) || strings.HasPrefix(value, "lat$")
+}
+
+// privateKeyMarker is what sensitiveCatalogueText looks for in a value
+// upper-cased.
+const privateKeyMarker = "PRIVATE KEY"
+
+// containsPrivateKey reports strings.Contains(strings.ToUpper(value),
+// privateKeyMarker). On an ASCII value ToUpper maps only a to z, so the
+// search folds those in place instead of building the upper-cased copy (a
+// third of what screening a catalogue row cost). A value with any other byte
+// takes ToUpper itself, whose Unicode mapping can produce ASCII letters (the
+// dotless ı upper-cases to I).
+func containsPrivateKey(value string) bool {
+	for i := 0; i < len(value); i++ {
+		if value[i] >= utf8.RuneSelf {
+			return strings.Contains(strings.ToUpper(value), privateKeyMarker)
+		}
+	}
+	for i := 0; i+len(privateKeyMarker) <= len(value); i++ {
+		j := 0
+		for j < len(privateKeyMarker) && asciiUpper(value[i+j]) == privateKeyMarker[j] {
+			j++
+		}
+		if j == len(privateKeyMarker) {
+			return true
+		}
+	}
+	return false
+}
+
+// asciiUpper is strings.ToUpper on one ASCII byte.
+func asciiUpper(b byte) byte {
+	if b >= 'a' && b <= 'z' {
+		return b - ('a' - 'A')
+	}
+	return b
+}
+
+// containsControl reports strings.ContainsFunc(value, unicode.IsControl). An
+// ASCII byte is a control character exactly when it is below 0x20 or is DEL;
+// from the first byte that is not ASCII, which starts a rune since every byte
+// before it is one, the rest is judged by unicode.IsControl as before.
+func containsControl(value string) bool {
+	for i := 0; i < len(value); i++ {
+		b := value[i]
+		if b >= utf8.RuneSelf {
+			return strings.ContainsFunc(value[i:], unicode.IsControl)
+		}
+		if b < 0x20 || b == 0x7f {
+			return true
+		}
+	}
+	return false
 }
 
 // Validate checks a chain block.
@@ -1102,7 +1156,7 @@ func jsonFieldName(field reflect.StructField) string {
 // bounded, trimmed and printable.
 func validCatalogueID(value string) bool {
 	return value != "" && value == strings.TrimSpace(value) && len(value) <= MaxSubscriptionURIBytes &&
-		!strings.ContainsFunc(value, unicode.IsControl)
+		!containsControl(value)
 }
 
 func validCatalogueToken(value string) bool {
@@ -1110,5 +1164,5 @@ func validCatalogueToken(value string) bool {
 }
 
 func validTemplateText(value string, maxBytes int) bool {
-	return len(value) <= maxBytes && !strings.ContainsFunc(value, unicode.IsControl)
+	return len(value) <= maxBytes && !containsControl(value)
 }

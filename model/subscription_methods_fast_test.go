@@ -158,3 +158,57 @@ func FuzzDecodeSelectionPlanFastAgreesWithTheStrictDecode(f *testing.F) {
 		samePlanDecode(t, raw)
 	})
 }
+
+func sameSnapshotWire(t *testing.T, raw []byte) {
+	t.Helper()
+	fast, fastFields, ok := decodeSnapshotWireFast(raw)
+	if !ok {
+		return
+	}
+	if err := rejectDuplicateJSONFields(raw); err != nil {
+		t.Fatalf("snapshot %q: the fast decode admits a duplicate key: %v", raw, err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var want snapshotWire
+	if err := decoder.Decode(&want); err != nil {
+		t.Fatalf("snapshot %q: the fast decode admits what the strict decode refuses: %v", raw, err)
+	}
+	var wantFields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &wantFields); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(fast, want) || len(fastFields) != len(wantFields) {
+		t.Fatalf("snapshot %q: fast %+v %v, strict %+v %v", raw, fast, fastFields, want, wantFields)
+	}
+	for k, v := range wantFields {
+		if string(fastFields[k]) != string(v) {
+			t.Fatalf("snapshot %q: member %s is %s, strict %s", raw, k, fastFields[k], v)
+		}
+	}
+}
+
+var snapshotCorpus = []string{
+	`{"schema_version":2,"plugin_id":"p","subscription_id":"s","raw":"{\"rows\":[]}","userinfo":"","fetched_at":"2026-10-16T00:00:00Z","last_attempt_at":"2026-10-16T00:00:00Z","stale":false}`,
+	`{"schema_version":2,"plugin_id":"p","subscription_id":"s","raw":"x","source_version":"v","source_manifest":{"a":1}}`,
+	`{"schema_version":1,"plugin_id":"p","subscription_id":"s","fetch_error":"e","fetched_at":null}`, `{"Raw":"x"}`, `{"raw":"x","extra":1}`,
+	`{"fetched_at":"not a time"}`, `{"raw":1}`, `{"raw":"a","raw":"b"}`, `[]`, `{"stale":"no"}`,
+}
+
+func TestSnapshotWireFastAgreesWithTheStrictDecode(t *testing.T) {
+	for _, raw := range snapshotCorpus {
+		sameSnapshotWire(t, []byte(raw))
+	}
+	if _, _, ok := decodeSnapshotWireFast([]byte(snapshotCorpus[0])); !ok {
+		t.Fatal("a plain snapshot does not take the fast path")
+	}
+}
+
+func FuzzSnapshotWireFastAgreesWithTheStrictDecode(f *testing.F) {
+	for _, raw := range snapshotCorpus {
+		f.Add([]byte(raw))
+	}
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		sameSnapshotWire(t, raw)
+	})
+}

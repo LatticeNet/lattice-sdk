@@ -48,6 +48,9 @@ func (r Request) CallPayload() (CallPayload, error) {
 	if len(r.Payload) == 0 {
 		return CallPayload{}, nil
 	}
+	if fast, ok := callPayloadFast(r.Payload); ok {
+		return fast, nil
+	}
 	if err := json.Unmarshal(r.Payload, &call); err != nil {
 		return CallPayload{}, fmt.Errorf("decode call payload: %w", err)
 	}
@@ -318,14 +321,11 @@ func (rt *Runtime) ServeV2(ctx context.Context, handler Handler, generation uint
 		if err := session.Accept("invoke_ready", frame.Generation, frame.InvocationID); err != nil {
 			return err
 		}
-		out := struct {
-			Protocol     int      `json:"protocol"`
-			Kind         string   `json:"kind"`
-			Generation   uint64   `json:"generation"`
-			InvocationID string   `json:"invocation_id"`
-			Response     Response `json:"response"`
-		}{2, "invoke_result", generation, frame.InvocationID, resp}
-		if err := rt.emitV2(out); err != nil {
+		if encoded, ok := appendInvokeResultFrame(nil, generation, frame.InvocationID, resp); ok {
+			if err := rt.emitV2Bytes(encoded); err != nil {
+				return err
+			}
+		} else if err := rt.emitV2(invokeResultFrame{2, "invoke_result", generation, frame.InvocationID, resp}); err != nil {
 			return err
 		}
 		ready.InvocationID = frame.InvocationID
@@ -375,14 +375,14 @@ func decodeInvokeV2(raw []byte, generation uint64, maxBytes int) (struct {
 			Request      *Request `json:"request"`
 		}{}, ErrV2Protocol
 	}
-	var frame struct {
-		Protocol     int      `json:"protocol"`
-		Kind         string   `json:"kind"`
-		Generation   uint64   `json:"generation"`
-		InvocationID string   `json:"invocation_id"`
-		Request      *Request `json:"request"`
+	frame, fast := decodeInvokeV2Fast(raw)
+	if !fast {
+		frame = invokeV2Frame{}
+		if err := strictDecodeFrame(raw, &frame); err != nil {
+			return frame, ErrV2Protocol
+		}
 	}
-	if err := strictDecodeFrame(raw, &frame); err != nil || frame.Protocol != 2 || frame.Kind != "invoke" || frame.Generation == 0 || frame.Generation != generation || !validInvocationID(frame.InvocationID) || frame.Request == nil {
+	if frame.Protocol != 2 || frame.Kind != "invoke" || frame.Generation == 0 || frame.Generation != generation || !validInvocationID(frame.InvocationID) || frame.Request == nil {
 		return frame, ErrV2Protocol
 	}
 	return frame, nil
@@ -401,6 +401,31 @@ func (rt *Runtime) emitV2(v any) error {
 	rt.writeMu.Lock()
 	defer rt.writeMu.Unlock()
 	return json.NewEncoder(rt.Out).Encode(v)
+}
+
+// invokeResultFrame is the invoke_result frame as encoding/json writes it.
+type invokeResultFrame struct {
+	Protocol     int      `json:"protocol"`
+	Kind         string   `json:"kind"`
+	Generation   uint64   `json:"generation"`
+	InvocationID string   `json:"invocation_id"`
+	Response     Response `json:"response"`
+}
+
+// emitV2Bytes writes one frame already encoded, newline included, through
+// the writer emitV2 uses, in one Write as json.Encoder does.
+func (rt *Runtime) emitV2Bytes(frame []byte) error {
+	if rt.v2Transport != nil {
+		t := rt.v2Transport
+		t.writeMu.Lock()
+		defer t.writeMu.Unlock()
+		_, err := t.output.Write(frame)
+		return err
+	}
+	rt.writeMu.Lock()
+	defer rt.writeMu.Unlock()
+	_, err := rt.Out.Write(frame)
+	return err
 }
 
 func NewRuntime(opts RuntimeOptions) *Runtime {

@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/LatticeNet/lattice-sdk/strictjson"
 )
 
 const (
@@ -317,9 +319,12 @@ func (c *HostClient) Call(ctx context.Context, method string, params any) (json.
 	}
 	var env hostResponseEnvelope
 	if c.strict {
-		var strictEnv strictHostResponseEnvelope
-		if err := strictDecodeFrame(scanned.raw, &strictEnv); err != nil {
-			return nil, fmt.Errorf("decode host_response: %w", err)
+		strictEnv, fast := decodeHostResponseFast(scanned.raw)
+		if !fast {
+			strictEnv = strictHostResponseEnvelope{}
+			if err := strictDecodeFrame(scanned.raw, &strictEnv); err != nil {
+				return nil, fmt.Errorf("decode host_response: %w", err)
+			}
 		}
 		env.Protocol, env.Kind, env.Generation, env.InvocationID, env.HostCallID = strictEnv.Protocol, strictEnv.Kind, strictEnv.Generation, strictEnv.InvocationID, strictEnv.HostCallID
 		if len(strictEnv.HostResponse.ID) == 0 || bytes.Equal(strictEnv.HostResponse.ID, []byte("null")) || len(strictEnv.HostResponse.OK) == 0 || bytes.Equal(strictEnv.HostResponse.OK, []byte("null")) {
@@ -420,7 +425,14 @@ func strictDecodeFrame(raw []byte, dst any) error {
 	return nil
 }
 
+// rejectDuplicateJSONKeys refuses a frame with a duplicate key in any object.
+// strictjson.Valid admits a well-formed, duplicate-free frame in one pass
+// without allocating; anything it refuses is judged by the token walk below,
+// which is the specification and words every error.
 func rejectDuplicateJSONKeys(raw []byte) error {
+	if strictjson.Valid(raw) {
+		return nil
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	var walk func() error
 	walk = func() error {

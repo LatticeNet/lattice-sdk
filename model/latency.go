@@ -23,7 +23,8 @@ const MonitorManagedLatency = "latency"
 
 // The kind a latency configuration probes with (LatencyProbeConfig.Method
 // and SourceMethods). Generated checks are one per (target, kind): tcp keeps
-// the id mon_lat_<target> and its history, icmp uses mon_lati_<target>.
+// the id mon_lat_<target> and its history, icmp uses mon_lati_<target> and
+// beacon (LatencyMethodBeacon) mon_latb_<target>.
 const (
 	// LatencyMethodTCP connects to the target's public line port, what
 	// every configuration did before design 29 M2a. An empty Method reads
@@ -34,8 +35,13 @@ const (
 	// unknown (agent_too_old) rather than falling back.
 	LatencyMethodICMP = MonitorTypeICMP
 	// LatencyMethodAuto picks, per source and target, the first kind both
-	// ends support: icmp when the source runs it and the target has a
-	// public IPv4, else tcp when the target has a TCP line.
+	// ends support: beacon when the target has an enabled beacon whose
+	// applied plan approved the source and the source runs the beacon
+	// client; else icmp when the source runs it, the target has a public
+	// IPv4 and icmp does not read icmp_filtered for that pair; else tcp
+	// when the target has a TCP line. A pair that has read icmp_filtered
+	// stays on tcp while icmp's latest result for it is that verdict, so the
+	// series does not flap between methods.
 	LatencyMethodAuto = "auto"
 )
 
@@ -208,6 +214,11 @@ type LatencyProbeNode struct {
 	// while that check exists. Endpoint and MonitorID are the tcp ones.
 	ICMPTarget    string `json:"icmp_target,omitempty"`
 	ICMPMonitorID string `json:"icmp_monitor_id,omitempty"`
+	// BeaconTarget is the advertised endpoint beacon sources send to, empty
+	// while the node has no applied, enabled beacon; BeaconMonitorID is its
+	// generated beacon check, set while that check exists.
+	BeaconTarget    string `json:"beacon_target,omitempty"`
+	BeaconMonitorID string `json:"beacon_monitor_id,omitempty"`
 }
 
 // LatencyProbePairState is one source to target pair of the plan.

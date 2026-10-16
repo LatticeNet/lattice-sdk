@@ -17,12 +17,15 @@ import (
 // the same rules from here, so a check the control plane accepts is one an
 // agent will run, and an agent refuses what the control plane would.
 
-// MonitorTypeBeacon is reserved for the authenticated UDP beacon of design
-// 29 D3 (M2b). Nothing creates a beacon check yet; agents that run one
-// will report it in Node.ProbeMethods.
+// MonitorTypeBeacon sends authenticated UDP requests to a node's beacon
+// (design 29 D3, D12). A beacon check always names TargetNode and never an
+// address: the control plane resolves Target to the node's advertised
+// endpoint (address:port) each time it hands the check out, and the source
+// signs with the path key it holds for that node. Agents that run it report
+// it in Node.ProbeMethods.
 const MonitorTypeBeacon = "beacon"
 
-// Multi-packet runs (icmp; beacon from M2b).
+// Multi-packet runs (icmp and beacon).
 const (
 	MonitorPacketsDefault = 5
 	MonitorPacketsMax     = 10

@@ -153,7 +153,10 @@ type Node struct {
 	// kernel's ping_group_range excludes the agent's group). A refused kind
 	// is not in ProbeMethods.
 	ProbeRefusals map[string]string `json:"probe_refusals,omitempty"`
-	CreatedAt     time.Time         `json:"created_at"`
+	// Beacon is what the agent last reported about its beacon responder
+	// (design 29 D12), nil for an agent that reports nothing.
+	Beacon    *BeaconFacts `json:"beacon,omitempty"`
+	CreatedAt time.Time    `json:"created_at"`
 }
 
 // AgentDebugPolicy is the operator-owned diagnostic mode for a node-agent. When
@@ -216,6 +219,10 @@ type AgentConfig struct {
 	// means "no override" — the agent keeps its startup -ip-mode/-ip-resolvers
 	// flags. Old agents that do not know this field ignore it safely.
 	IPConfig *NodeIPConfig `json:"ip_config,omitempty"`
+	// Beacon carries this node's beacon source id, its path keys as a
+	// source and its responder (design 29 D12). Absent when the node has
+	// none of them; agents that do not know the field ignore it.
+	Beacon *AgentBeaconConfig `json:"beacon,omitempty"`
 }
 
 const (

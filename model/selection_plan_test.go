@@ -167,6 +167,18 @@ func TestSelectionPlanStructuralRefusals(t *testing.T) {
 	if err, want := full.ValidateEncoded([]byte(mustJSON(t, full))), full.Validate(); (err == nil) != (want == nil) {
 		t.Fatalf("ValidateEncoded answers %v on a valid plan, Validate %v", err, want)
 	}
+	if err := full.ValidateWellFormedNodes(); err != nil {
+		t.Fatalf("ValidateWellFormedNodes refuses a valid plan: %v", err)
+	}
+	// Every refusal that does not rest on a node's JSON is the same.
+	for name, plan := range cases {
+		if name == "node not an object" || name == "duplicate key in a node" {
+			continue
+		}
+		if got, want := plan.ValidateWellFormedNodes(), plan.Validate(); got == nil || got.Error() != want.Error() {
+			t.Fatalf("%s: ValidateWellFormedNodes answers %v, Validate %v", name, got, want)
+		}
+	}
 }
 
 func TestSelectionPlanNodeCountAtTheBound(t *testing.T) {

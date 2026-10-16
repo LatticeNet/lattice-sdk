@@ -342,6 +342,15 @@ func (p SelectionPlan) ValidateEncoded(raw []byte) error {
 	return p.validate(true)
 }
 
+// ValidateWellFormedNodes is Validate for a plan whose every node the caller
+// has already proven a well-formed JSON object with no duplicate key at any
+// depth (strictjson.Valid or strictjson.Compact admitted it): each node then
+// only has to open an object, and nothing is scanned again. The plugin
+// proves its nodes so as it encodes them, in parallel.
+func (p SelectionPlan) ValidateWellFormedNodes() error {
+	return p.validate(true)
+}
+
 // validate is Validate; keysChecked skips the duplicate-key scan of each node
 // when the caller already scanned the whole encoded plan, which also proved
 // every node well formed.

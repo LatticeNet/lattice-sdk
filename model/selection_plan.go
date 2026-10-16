@@ -193,7 +193,7 @@ func (s PlanSelection) Validate() error {
 	}
 	seen := make(map[string]struct{}, len(s.LineUUIDs))
 	for _, id := range s.LineUUIDs {
-		if !subscriptionSourceUUIDv4.MatchString(id) {
+		if !isUUIDv4(id) {
 			return fmt.Errorf("plan selection line_uuid %q is not a lowercase uuidv4", id)
 		}
 		if _, dup := seen[id]; dup {
@@ -238,7 +238,7 @@ type SelectionPlanNode struct {
 // NewPlanPlaceholder returns a fresh placeholder for one credential field of
 // one line, with a random part from crypto/rand.
 func NewPlanPlaceholder(lineUUID, field string) (string, error) {
-	if !subscriptionSourceUUIDv4.MatchString(lineUUID) {
+	if !isUUIDv4(lineUUID) {
 		return "", errors.New("placeholder line_uuid must be a lowercase uuidv4")
 	}
 	if !planPlaceholderField.MatchString(field) {
@@ -259,11 +259,43 @@ func ParsePlanPlaceholder(value string) (lineUUID, field string, err error) {
 	if !ok {
 		return "", "", errors.New("not a plan placeholder")
 	}
-	match := planPlaceholderBody.FindStringSubmatch(body)
-	if match == nil || len(match[0]) != len(body) {
+	line, field, ok := splitPlaceholderBody(body)
+	if !ok {
 		return "", "", errors.New("malformed plan placeholder")
 	}
-	return match[1], match[2], nil
+	return line, field, nil
+}
+
+// splitPlaceholderBody matches body against planPlaceholderBody in full,
+// without the regexp engine: a lowercase UUIDv4, a hyphen, a field of one to
+// 32 bytes ([a-z][a-z0-9_]*), a hyphen and 32 lowercase hex digits ending
+// body. Neither the field nor the hex holds a hyphen, so the field is
+// whatever lies between the UUID and the last 33 bytes.
+func splitPlaceholderBody(body string) (line, field string, ok bool) {
+	const uuid, random = 36, 2 * PlanPlaceholderRandomBytes
+	if len(body) < uuid+1+1+1+random || !isUUIDv4(body[:uuid]) || body[uuid] != '-' {
+		return "", "", false
+	}
+	rest := body[uuid+1:]
+	n := len(rest) - random - 1
+	if n < 1 || n > MaxPlanPlaceholderFieldBytes || rest[n] != '-' {
+		return "", "", false
+	}
+	field = rest[:n]
+	if field[0] < 'a' || field[0] > 'z' {
+		return "", "", false
+	}
+	for i := 1; i < n; i++ {
+		if c := field[i]; (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' {
+			return "", "", false
+		}
+	}
+	for i := n + 1; i < len(rest); i++ {
+		if c := rest[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return "", "", false
+		}
+	}
+	return body[:uuid], field, true
 }
 
 // CountPlanPlaceholders counts every well-formed placeholder in a document,
@@ -371,7 +403,7 @@ func (n SelectionPlanNode) validate(wellFormed bool) error {
 		}
 		return nil
 	}
-	if !subscriptionSourceUUIDv4.MatchString(n.LineUUID) {
+	if !isUUIDv4(n.LineUUID) {
 		return errors.New("line_uuid must be a lowercase uuidv4")
 	}
 	for field, placeholder := range n.Placeholders {

@@ -466,7 +466,7 @@ func encodedLength(v any) (int, error) {
 }
 
 func (r LineCatalogueRow) validateFields() error {
-	if !subscriptionSourceUUIDv4.MatchString(r.LineUUID) {
+	if !isUUIDv4(r.LineUUID) {
 		return errors.New("line catalogue row: line_uuid must be a lowercase uuidv4")
 	}
 	type namedValue struct{ name, value string }
@@ -637,7 +637,7 @@ func (c LineCatalogueChain) Validate() error {
 	default:
 		return fmt.Errorf("invalid chain path state %q", c.PathState)
 	}
-	if c.DownstreamLineUUID != "" && !subscriptionSourceUUIDv4.MatchString(c.DownstreamLineUUID) {
+	if c.DownstreamLineUUID != "" && !isUUIDv4(c.DownstreamLineUUID) {
 		return errors.New("chain downstream_line_uuid must be a lowercase uuidv4")
 	}
 	switch c.PathServiceState {
@@ -710,7 +710,7 @@ func (s LineCatalogueSelector) Validate() error {
 	}
 	seen := make(map[string]struct{}, len(s.LineUUIDs))
 	for _, id := range s.LineUUIDs {
-		if !subscriptionSourceUUIDv4.MatchString(id) {
+		if !isUUIDv4(id) {
 			return fmt.Errorf("selector line_uuid %q is not a lowercase uuidv4", id)
 		}
 		if _, dup := seen[id]; dup {

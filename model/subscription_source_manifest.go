@@ -101,6 +101,38 @@ type SubscriptionSourceManifestTerminal struct {
 
 var subscriptionSourceUUIDv4 = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
+// isUUIDv4 is subscriptionSourceUUIDv4.MatchString without the regexp
+// engine, which a 1000-node plan or page runs thousands of times: 36 bytes,
+// lowercase hex in groups of 8, 4, 4, 4 and 12, version nibble 4, variant
+// 8, 9, a or b.
+func isUUIDv4(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i := 0; i < 36; i++ {
+		c := s[i]
+		switch i {
+		case 8, 13, 18, 23:
+			if c != '-' {
+				return false
+			}
+		case 14:
+			if c != '4' {
+				return false
+			}
+		case 19:
+			if c != '8' && c != '9' && c != 'a' && c != 'b' {
+				return false
+			}
+		default:
+			if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func CanonicalSubscriptionSourceManifest(manifest SubscriptionSourceManifestV1) ([]byte, string, error) {
 	manifest = manifest.Clone()
 	if err := manifest.Validate(); err != nil {
@@ -171,7 +203,7 @@ func (m SubscriptionSourceManifestV1) Validate() error {
 	seenRoots := make(map[string]struct{}, len(m.EntryRoots))
 	visits := 0
 	for i, root := range m.EntryRoots {
-		if !subscriptionSourceUUIDv4.MatchString(root) {
+		if !isUUIDv4(root) {
 			return errors.New("invalid subscription source root")
 		}
 		if _, ok := seenRoots[root]; ok {
@@ -193,7 +225,7 @@ func (m SubscriptionSourceManifestV1) Validate() error {
 		current := root
 		for _, edge := range entry.Path {
 			visits++
-			if visits > MaxSubscriptionSourceVisits || edge.Source != current || !subscriptionSourceUUIDv4.MatchString(edge.Target) || edge.Generation == 0 || edge.ObservationRevision == 0 || edge.Status != "converged" {
+			if visits > MaxSubscriptionSourceVisits || edge.Source != current || !isUUIDv4(edge.Target) || edge.Generation == 0 || edge.ObservationRevision == 0 || edge.Status != "converged" {
 				return errors.New("invalid subscription source path")
 			}
 			if _, exists := visited[edge.Target]; exists {
@@ -203,7 +235,7 @@ func (m SubscriptionSourceManifestV1) Validate() error {
 			current = edge.Target
 		}
 		terminal := entry.Terminal
-		if terminal.LineUUID != current || !subscriptionSourceUUIDv4.MatchString(terminal.LineUUID) || terminal.Generation == 0 || terminal.ObservationRevision == 0 || terminal.Status != "converged" {
+		if terminal.LineUUID != current || !isUUIDv4(terminal.LineUUID) || terminal.Generation == 0 || terminal.ObservationRevision == 0 || terminal.Status != "converged" {
 			return errors.New("invalid subscription source terminal")
 		}
 	}

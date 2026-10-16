@@ -145,12 +145,27 @@ func TestSelectionPlanStructuralRefusals(t *testing.T) {
 		if err := plan.Validate(); err == nil {
 			t.Fatalf("%s: plan accepted", name)
 		}
+		// ValidateEncoded over the plan's own encoding refuses the same
+		// plans with the same words.
+		if raw, err := json.Marshal(plan); err == nil {
+			if got, want := plan.ValidateEncoded(raw), plan.Validate(); got == nil || got.Error() != want.Error() {
+				t.Fatalf("%s: ValidateEncoded answers %v, Validate %v", name, got, want)
+			}
+		}
 	}
 	// A fleet node without a line is the core's to exclude with no_line,
 	// not a broken plan.
 	noLine := SelectionPlan{Kind: SelectionPlanKindNodes, Nodes: []SelectionPlanNode{{Node: json.RawMessage(`{"name":"injected","server":"evil.example"}`)}}}
 	if err := noLine.Validate(); err != nil {
 		t.Fatalf("plan with a lineless fleet node refused: %v", err)
+	}
+	if err := noLine.ValidateEncoded([]byte(mustJSON(t, noLine))); err != nil {
+		t.Fatalf("ValidateEncoded refuses a plan with a lineless fleet node: %v", err)
+	}
+	full := SelectionPlan{Kind: SelectionPlanKindNodes, Nodes: []SelectionPlanNode{fleetPlanNode(catalogueLineA), {Provider: true, Node: json.RawMessage(`{"name":"p"}`)}},
+		Selection: &PlanSelection{CatalogueVersion: "lcv1-x", LineUUIDs: []string{catalogueLineA}}}
+	if err, want := full.ValidateEncoded([]byte(mustJSON(t, full))), full.Validate(); (err == nil) != (want == nil) {
+		t.Fatalf("ValidateEncoded answers %v on a valid plan, Validate %v", err, want)
 	}
 }
 

@@ -298,8 +298,21 @@ func (p SelectionPlan) Validate() error {
 	return p.validate(false)
 }
 
+// ValidateEncoded is Validate for a plan the caller has just encoded: raw
+// must be the plan's encoding (json.Marshal of p, or bytes equal to it). One
+// duplicate-key pass over raw then stands in for the pass over every node,
+// and a node only has to open an object, because raw holding it is valid. A
+// raw that pass does not admit is judged by Validate, which words the error.
+func (p SelectionPlan) ValidateEncoded(raw []byte) error {
+	if !strictjson.Valid(raw) {
+		return p.Validate()
+	}
+	return p.validate(true)
+}
+
 // validate is Validate; keysChecked skips the duplicate-key scan of each node
-// when the caller already scanned the whole encoded plan.
+// when the caller already scanned the whole encoded plan, which also proved
+// every node well formed.
 func (p SelectionPlan) validate(keysChecked bool) error {
 	switch p.Kind {
 	case SelectionPlanKindNodes:
@@ -317,7 +330,7 @@ func (p SelectionPlan) validate(keysChecked bool) error {
 		return fmt.Errorf("plan has more than %d nodes", MaxSubscriptionRecordNodes)
 	}
 	for i, node := range p.Nodes {
-		if err := node.validate(); err != nil {
+		if err := node.validate(keysChecked); err != nil {
 			return fmt.Errorf("plan node %d: %w", i, err)
 		}
 		if !keysChecked {
@@ -342,8 +355,8 @@ func (p SelectionPlan) validate(keysChecked bool) error {
 	return ValidateResponseChain(p.ResponseChain)
 }
 
-func (n SelectionPlanNode) validate() error {
-	if !isJSONObject(n.Node) {
+func (n SelectionPlanNode) validate(wellFormed bool) error {
+	if wellFormed && !opensObject(n.Node) || !wellFormed && !isJSONObject(n.Node) {
 		return errors.New("node must be a JSON object")
 	}
 	if n.Provider {
@@ -438,6 +451,12 @@ func DecodeSelectionPlan(raw []byte) (SelectionPlan, error) {
 		return SelectionPlan{}, err
 	}
 	return plan, nil
+}
+
+// opensObject is isJSONObject for a node already known to be well formed.
+func opensObject(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) > 0 && trimmed[0] == '{'
 }
 
 func isJSONObject(raw json.RawMessage) bool {

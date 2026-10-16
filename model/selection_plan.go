@@ -529,8 +529,14 @@ func decodeSelectionPlanFast(raw []byte) (SelectionPlan, bool) {
 				return SelectionPlan{}, false
 			}
 			plan.Nodes = make([]SelectionPlanNode, len(elements))
-			for i, element := range elements {
-				if !decodePlanNodeFast(element, &plan.Nodes[i]) {
+			decoded := make([]bool, len(elements))
+			// Nodes decode independently, so a large plan's decode in
+			// parallel.
+			eachIndex(len(elements), func(i int) {
+				decoded[i] = decodePlanNodeFast(elements[i], &plan.Nodes[i])
+			})
+			for _, ok := range decoded {
+				if !ok {
 					return SelectionPlan{}, false
 				}
 			}

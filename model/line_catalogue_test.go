@@ -353,6 +353,19 @@ func TestLineCatalogueRowEncodedSizeBound(t *testing.T) {
 	if err := over.Validate(); err == nil {
 		t.Fatal("row one byte over the bound accepted")
 	}
+	// ValidateEncoded reads the bound from the encoding the caller made,
+	// with Validate's verdict and wording.
+	if err := at.ValidateEncoded([]byte(mustJSON(t, at))); err != nil {
+		t.Fatalf("ValidateEncoded refuses the row at the bound: %v", err)
+	}
+	if err, want := over.ValidateEncoded([]byte(mustJSON(t, over))), over.Validate(); err == nil || err.Error() != want.Error() {
+		t.Fatalf("ValidateEncoded over the bound answers %v, Validate %v", err, want)
+	}
+	broken := fullCatalogueRow(t)
+	broken.LineUUID = "not-a-uuid"
+	if err, want := broken.ValidateEncoded([]byte(mustJSON(t, broken))), broken.Validate(); err == nil || err.Error() != want.Error() {
+		t.Fatalf("ValidateEncoded on a broken field answers %v, Validate %v", err, want)
+	}
 }
 
 func TestLineCatalogueSelectorFieldNames(t *testing.T) {

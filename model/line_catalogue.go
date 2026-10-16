@@ -419,31 +419,66 @@ func (r LineCatalogueRow) validate() (int, error) {
 	if err := r.validateFields(); err != nil {
 		return 0, err
 	}
-	raw, err := json.Marshal(r)
+	size, err := encodedLength(r)
 	if err != nil {
 		return 0, fmt.Errorf("line catalogue row %s: %w", r.LineUUID, err)
 	}
-	if len(raw) > MaxLineCatalogueRowBytes {
-		return 0, fmt.Errorf("line catalogue row %s encodes to %d bytes, over %d", r.LineUUID, len(raw), MaxLineCatalogueRowBytes)
+	return size, r.checkSize(size)
+}
+
+// ValidateEncoded is Validate for a row the caller has just encoded: raw
+// must be json.Marshal(r), and the size bound is read from it instead of
+// from a second encoding. Core encodes every row it serves, so it validates
+// with this and encodes each row once.
+func (r LineCatalogueRow) ValidateEncoded(raw []byte) error {
+	if err := r.validateFields(); err != nil {
+		return err
 	}
-	return len(raw), nil
+	return r.checkSize(len(raw))
+}
+
+func (r LineCatalogueRow) checkSize(size int) error {
+	if size > MaxLineCatalogueRowBytes {
+		return fmt.Errorf("line catalogue row %s encodes to %d bytes, over %d", r.LineUUID, size, MaxLineCatalogueRowBytes)
+	}
+	return nil
+}
+
+// byteCounter counts what is written to it and keeps nothing.
+type byteCounter int
+
+func (c *byteCounter) Write(p []byte) (int, error) {
+	*c += byteCounter(len(p))
+	return len(p), nil
+}
+
+// encodedLength is len(json.Marshal(v)) without the copy Marshal returns: an
+// Encoder writes the same bytes (HTML escaping included) from its pooled
+// buffer, plus one newline.
+func encodedLength(v any) (int, error) {
+	var n byteCounter
+	if err := json.NewEncoder(&n).Encode(v); err != nil {
+		return 0, err
+	}
+	return int(n) - 1, nil
 }
 
 func (r LineCatalogueRow) validateFields() error {
 	if !subscriptionSourceUUIDv4.MatchString(r.LineUUID) {
 		return errors.New("line catalogue row: line_uuid must be a lowercase uuidv4")
 	}
-	for name, value := range map[string]string{"line_hash_id": r.LineHashID, "node_id": r.NodeID, "protocol": r.Protocol} {
-		if !validCatalogueID(value) {
-			return fmt.Errorf("line catalogue row %s: invalid %s", r.LineUUID, name)
+	type namedValue struct{ name, value string }
+	for _, f := range [...]namedValue{{"line_hash_id", r.LineHashID}, {"node_id", r.NodeID}, {"protocol", r.Protocol}} {
+		if !validCatalogueID(f.value) {
+			return fmt.Errorf("line catalogue row %s: invalid %s", r.LineUUID, f.name)
 		}
 	}
-	for name, value := range map[string]string{
-		"transport": r.Transport, "security": r.Security, "overlay_status": r.OverlayStatus,
-		"status": r.Status, "service_state": r.ServiceState,
+	for _, f := range [...]namedValue{
+		{"transport", r.Transport}, {"security", r.Security}, {"overlay_status", r.OverlayStatus},
+		{"status", r.Status}, {"service_state", r.ServiceState},
 	} {
-		if value != "" && !validCatalogueID(value) {
-			return fmt.Errorf("line catalogue row %s: invalid %s", r.LineUUID, name)
+		if f.value != "" && !validCatalogueID(f.value) {
+			return fmt.Errorf("line catalogue row %s: invalid %s", r.LineUUID, f.name)
 		}
 	}
 	for _, value := range []string{r.NodeName, r.Name, r.Label, r.PublicHost, r.ProviderEdge} {
@@ -556,6 +591,11 @@ func screenCatalogueValue(name string, value any) error {
 	return nil
 }
 
+// credentialSeparators drops the separators credentialName ignores. A
+// Replacer builds its lookup table on first use, so it is built once here
+// rather than once per screened key.
+var credentialSeparators = strings.NewReplacer("-", "", "_", "")
+
 // credentialName reports whether a field name is one a proxy protocol keeps
 // a credential under: the vless, vmess and tuic uuid (id in a vmess
 // document), the passwords of trojan, hysteria2, tuic, anytls, shadowsocks
@@ -564,7 +604,7 @@ func screenCatalogueValue(name string, value any) error {
 // a token. Case, hyphens and underscores are ignored, so private-key,
 // private_key and privateKey are one name.
 func credentialName(name string) bool {
-	folded := strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(name))
+	folded := strings.ToLower(credentialSeparators.Replace(name))
 	switch folded {
 	case "id", "uuid", "auth", "authstr", "psk", "username", "pass":
 		return true

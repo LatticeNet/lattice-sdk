@@ -1636,6 +1636,10 @@ type Monitor struct {
 	// Alert is the alert policy, a MonitorAlert* value. Empty reads as
 	// MonitorAlertDown, what every monitor did before the field existed.
 	Alert string `json:"alert,omitempty"`
+	// AlertAfter is how many failed runs in a row a source must have before
+	// MonitorAlertDown pages and the path reads down, 1 to
+	// MonitorAlertAfterMax. Zero reads as MonitorAlertAfterDefault.
+	AlertAfter int `json:"alert_after,omitempty"`
 	// Version counts edits. An edit names the version it was made from, so
 	// two operators editing one monitor cannot overwrite each other. A
 	// monitor created before edits existed reads as version zero.
@@ -1646,12 +1650,18 @@ type Monitor struct {
 
 // Monitor alert policies (Monitor.Alert).
 const (
-	// MonitorAlertDown pages when a source fails twice in a row and
-	// announces the recovery.
+	// MonitorAlertDown pages when a source fails AlertAfter times in a row
+	// and announces the recovery.
 	MonitorAlertDown = "down"
 	// MonitorAlertOff never pages; the monitor's state and history are
 	// kept as for any other.
 	MonitorAlertOff = "off"
+)
+
+// Bounds of Monitor.AlertAfter.
+const (
+	MonitorAlertAfterDefault = 2
+	MonitorAlertAfterMax     = 20
 )
 
 // MonitorUpdate edits one monitor (POST /api/monitors/update). Version is
@@ -1670,6 +1680,7 @@ type MonitorUpdate struct {
 	TimeoutSec    *int      `json:"timeout_sec,omitempty"`
 	ThresholdDays *int      `json:"threshold_days,omitempty"`
 	Alert         *string   `json:"alert,omitempty"`
+	AlertAfter    *int      `json:"alert_after,omitempty"`
 	Enabled       *bool     `json:"enabled,omitempty"`
 	AssignAll     *bool     `json:"assign_all,omitempty"`
 	NodeIDs       *[]string `json:"node_ids,omitempty"`

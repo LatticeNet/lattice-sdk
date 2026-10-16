@@ -37,7 +37,7 @@ func TestMonitorEditFieldsOmittedUntilSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"paused_node_ids", "alert", "version"} {
+	for _, field := range []string{"paused_node_ids", "alert", "alert_after", "version"} {
 		if strings.Contains(string(raw), field) {
 			t.Fatalf("%s present on a monitor that never set it: %s", field, raw)
 		}

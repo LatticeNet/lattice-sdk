@@ -1627,9 +1627,53 @@ type Monitor struct {
 	// created. The owner rewrites a managed monitor whenever its own
 	// configuration or the fleet changes, so it is edited through that
 	// configuration and never deleted on its own. Agents ignore the field.
-	ManagedBy string    `json:"managed_by,omitempty"`
+	ManagedBy string `json:"managed_by,omitempty"`
+	// PausedNodeIDs are sources that keep their assignment and their history
+	// but do not run the monitor now: the control plane does not hand it to
+	// them and refuses a result one sends anyway. Each is in NodeIDs, or any
+	// node when AssignAll is set.
+	PausedNodeIDs []string `json:"paused_node_ids,omitempty"`
+	// Alert is the alert policy, a MonitorAlert* value. Empty reads as
+	// MonitorAlertDown, what every monitor did before the field existed.
+	Alert string `json:"alert,omitempty"`
+	// Version counts edits. An edit names the version it was made from, so
+	// two operators editing one monitor cannot overwrite each other. A
+	// monitor created before edits existed reads as version zero.
+	Version   int64     `json:"version,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Monitor alert policies (Monitor.Alert).
+const (
+	// MonitorAlertDown pages when a source fails twice in a row and
+	// announces the recovery.
+	MonitorAlertDown = "down"
+	// MonitorAlertOff never pages; the monitor's state and history are
+	// kept as for any other.
+	MonitorAlertOff = "off"
+)
+
+// MonitorUpdate edits one monitor (POST /api/monitors/update). Version is
+// the version the edit was made from. Every other field is optional: absent
+// (or null) keeps the stored value, so an edit names only what it changes.
+// Type and Target are accepted only when they equal the stored values; a
+// different method or target is a new monitor, so one series never mixes
+// two of them. Generated monitors (ManagedBy set) refuse edits.
+type MonitorUpdate struct {
+	ID            string    `json:"id"`
+	Version       int64     `json:"version"`
+	Name          *string   `json:"name,omitempty"`
+	Type          *string   `json:"type,omitempty"`
+	Target        *string   `json:"target,omitempty"`
+	IntervalSec   *int      `json:"interval_sec,omitempty"`
+	TimeoutSec    *int      `json:"timeout_sec,omitempty"`
+	ThresholdDays *int      `json:"threshold_days,omitempty"`
+	Alert         *string   `json:"alert,omitempty"`
+	Enabled       *bool     `json:"enabled,omitempty"`
+	AssignAll     *bool     `json:"assign_all,omitempty"`
+	NodeIDs       *[]string `json:"node_ids,omitempty"`
+	PausedNodeIDs *[]string `json:"paused_node_ids,omitempty"`
 }
 
 // MonitorResult is a single probe outcome. Agents report them for tcp and http

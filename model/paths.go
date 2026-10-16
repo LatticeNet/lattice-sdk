@@ -48,6 +48,24 @@ const (
 	PathReasonNotProbeable = "not_probeable"
 	// PathReasonNoData: a result was expected and none is current.
 	PathReasonNoData = "no_data"
+	// PathReasonAgentTooOld: the source's agent does not run the check's
+	// kind (Node.ProbeMethods), so the control plane does not hand it the
+	// check. An agent handed a kind it does not know reports this reason
+	// instead of a failure.
+	PathReasonAgentTooOld = "agent_too_old"
+	// PathReasonICMPNotPermitted: the source's kernel refuses unprivileged
+	// echo sockets to the agent's group (net.ipv4.ping_group_range).
+	// Reported by the agent in Node.ProbeRefusals and on results.
+	PathReasonICMPNotPermitted = "icmp_not_permitted"
+	// PathReasonICMPFiltered: every echo of every recent run was lost on a
+	// path that has never had an echo back, so the target or a provider
+	// likely filters ICMP. Judged by the control plane; once a path has
+	// succeeded, all-loss runs read down instead.
+	PathReasonICMPFiltered = "icmp_filtered"
+	// PathReasonDestinationRefused: the agent refused to dial the address
+	// the target resolved to (MonitorDestinationRefused), or a check with
+	// secret headers asked for a request its rules forbid.
+	PathReasonDestinationRefused = "destination_refused"
 )
 
 // Monitor history retention.
@@ -121,6 +139,12 @@ type PathMethodChange struct {
 // off a histogram whose bins are about 9 percent wide. JitterMs is the mean
 // absolute difference between consecutive successful runs; Loss is Fail
 // over N, null when N is zero.
+//
+// Sent and Lost count probes: every echo of a multi-packet run (icmp) and
+// one per run of a single-probe kind (tcp, http), from design 29 M2a on.
+// Where Sent is above zero Loss is Lost over Sent; buckets written before
+// M2a carry zero and Loss stays Fail over N. A multi-packet run counts once
+// in N and in the latency figures, with its median RTT.
 type PathBucket struct {
 	T        time.Time `json:"t"`
 	N        int       `json:"n"`
@@ -132,6 +156,8 @@ type PathBucket struct {
 	MaxMs    *float64  `json:"max_ms"`
 	JitterMs *float64  `json:"jitter_ms"`
 	Loss     *float64  `json:"loss"`
+	Sent     int       `json:"sent,omitempty"`
+	Lost     int       `json:"lost,omitempty"`
 }
 
 // PathMatrix answers GET /api/monitors/paths: every path the caller may

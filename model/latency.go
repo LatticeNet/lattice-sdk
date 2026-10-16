@@ -82,6 +82,17 @@ type LatencyProbeConfig struct {
 	// SourceMethods pins the kind for single sources, by source node id,
 	// over Method.
 	SourceMethods map[string]string `json:"source_methods,omitempty"`
+	// Alert is the generated checks' alert policy, MonitorAlertOff,
+	// MonitorAlertDown or MonitorAlertDownAndDegraded; empty reads as off
+	// (EffectiveMonitorAlert), so a path set nobody changed never pages.
+	Alert string `json:"alert,omitempty"`
+	// AlertAfter is how many failed runs in a row a generated path must
+	// have before it reads down and, under a paging policy, pages, 1 to
+	// MonitorAlertAfterMax. Zero reads as MonitorAlertAfterDefault.
+	AlertAfter int `json:"alert_after,omitempty"`
+	// Degraded is the generated checks' degraded thresholds; nil reads as
+	// every default (design 29 D13).
+	Degraded *MonitorDegradedRule `json:"degraded,omitempty"`
 	// Version counts saves. A save must name the version it was made from,
 	// so two operators editing at once cannot overwrite each other.
 	Version   int64     `json:"version"`

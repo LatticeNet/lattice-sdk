@@ -1679,12 +1679,17 @@ type Monitor struct {
 	// node when AssignAll is set.
 	PausedNodeIDs []string `json:"paused_node_ids,omitempty"`
 	// Alert is the alert policy, a MonitorAlert* value. Empty reads as
-	// MonitorAlertDown, what every monitor did before the field existed.
+	// MonitorAlertDown, what every monitor did before the field existed
+	// (EffectiveMonitorAlert).
 	Alert string `json:"alert,omitempty"`
 	// AlertAfter is how many failed runs in a row a source must have before
 	// MonitorAlertDown pages and the path reads down, 1 to
 	// MonitorAlertAfterMax. Zero reads as MonitorAlertAfterDefault.
 	AlertAfter int `json:"alert_after,omitempty"`
+	// Degraded is the check's degraded thresholds (design 29 D13); nil
+	// reads as every default. A tls check takes none. Generated checks
+	// carry none of their own and read LatencyProbeConfig.Degraded.
+	Degraded *MonitorDegradedRule `json:"degraded,omitempty"`
 	// Version counts edits. An edit names the version it was made from, so
 	// two operators editing one monitor cannot overwrite each other. A
 	// monitor created before edits existed reads as version zero.
@@ -1701,7 +1706,26 @@ const (
 	// MonitorAlertOff never pages; the monitor's state and history are
 	// kept as for any other.
 	MonitorAlertOff = "off"
+	// MonitorAlertDownAndDegraded pages as MonitorAlertDown does and also
+	// sends path.degraded and path.recovered when a path of the check
+	// degrades and recovers (design 29 D13). A tls check refuses it.
+	MonitorAlertDownAndDegraded = "down_and_degraded"
 )
+
+// EffectiveMonitorAlert is the alert policy a check follows. An empty or
+// unknown policy reads as MonitorAlertDown on an operator's check, what every
+// check did before policies existed, and as MonitorAlertOff on the path set
+// and its generated checks, which never paged before they had a policy.
+func EffectiveMonitorAlert(alert string, generated bool) string {
+	switch alert {
+	case MonitorAlertOff, MonitorAlertDown, MonitorAlertDownAndDegraded:
+		return alert
+	}
+	if generated {
+		return MonitorAlertOff
+	}
+	return MonitorAlertDown
+}
 
 // Bounds of Monitor.AlertAfter.
 const (
@@ -1716,30 +1740,34 @@ const (
 // different method or target is a new monitor, so one series never mixes
 // two of them. Generated monitors (ManagedBy set) refuse edits.
 //
+// Degraded replaces the stored thresholds whole when present, so an empty
+// object resets them to the defaults; absent or null keeps them.
+//
 // TargetNode follows the Type and Target rule. Headers is a list of
 // per-header operations applied in order to the stored headers; a header it
 // does not name is kept, so an edit that echoes a read (which carries no
 // secret values) can neither wipe nor leak a secret. Absent or empty leaves
 // the headers as they are.
 type MonitorUpdate struct {
-	ID            string              `json:"id"`
-	Version       int64               `json:"version"`
-	Name          *string             `json:"name,omitempty"`
-	Type          *string             `json:"type,omitempty"`
-	Target        *string             `json:"target,omitempty"`
-	TargetNode    *string             `json:"target_node,omitempty"`
-	IntervalSec   *int                `json:"interval_sec,omitempty"`
-	TimeoutSec    *int                `json:"timeout_sec,omitempty"`
-	ThresholdDays *int                `json:"threshold_days,omitempty"`
-	Packets       *int                `json:"packets,omitempty"`
-	ExpectStatus  *string             `json:"expect_status,omitempty"`
-	Headers       []MonitorHeaderEdit `json:"headers,omitempty"`
-	Alert         *string             `json:"alert,omitempty"`
-	AlertAfter    *int                `json:"alert_after,omitempty"`
-	Enabled       *bool               `json:"enabled,omitempty"`
-	AssignAll     *bool               `json:"assign_all,omitempty"`
-	NodeIDs       *[]string           `json:"node_ids,omitempty"`
-	PausedNodeIDs *[]string           `json:"paused_node_ids,omitempty"`
+	ID            string               `json:"id"`
+	Version       int64                `json:"version"`
+	Name          *string              `json:"name,omitempty"`
+	Type          *string              `json:"type,omitempty"`
+	Target        *string              `json:"target,omitempty"`
+	TargetNode    *string              `json:"target_node,omitempty"`
+	IntervalSec   *int                 `json:"interval_sec,omitempty"`
+	TimeoutSec    *int                 `json:"timeout_sec,omitempty"`
+	ThresholdDays *int                 `json:"threshold_days,omitempty"`
+	Packets       *int                 `json:"packets,omitempty"`
+	ExpectStatus  *string              `json:"expect_status,omitempty"`
+	Headers       []MonitorHeaderEdit  `json:"headers,omitempty"`
+	Alert         *string              `json:"alert,omitempty"`
+	AlertAfter    *int                 `json:"alert_after,omitempty"`
+	Degraded      *MonitorDegradedRule `json:"degraded,omitempty"`
+	Enabled       *bool                `json:"enabled,omitempty"`
+	AssignAll     *bool                `json:"assign_all,omitempty"`
+	NodeIDs       *[]string            `json:"node_ids,omitempty"`
+	PausedNodeIDs *[]string            `json:"paused_node_ids,omitempty"`
 }
 
 // MonitorResult is a single probe outcome. Agents report them for tcp, http

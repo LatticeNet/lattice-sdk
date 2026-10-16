@@ -177,8 +177,34 @@ func TestFieldsAnswersTheTopLevelMembersAsEncodingJSONDecodesThem(t *testing.T) 
 	}
 }
 
+func TestElementsAnswersTheTopLevelElements(t *testing.T) {
+	elements, ok := Elements([]byte(` [ {"a":[1,2]} , "x",3 , [] ] `))
+	if !ok || len(elements) != 4 || string(elements[0]) != `{"a":[1,2]}` || string(elements[1]) != `"x"` || string(elements[2]) != `3` || string(elements[3]) != `[]` {
+		t.Fatalf("Elements = %q, %v", elements, ok)
+	}
+	if elements, ok := Elements([]byte(`[]`)); !ok || elements == nil || len(elements) != 0 {
+		t.Fatalf("Elements of an empty array = %q, %v", elements, ok)
+	}
+	for _, refused := range []string{`{}`, `"x"`, `[{"a":1,"a":2}]`, `[1,]`, `[1] x`} {
+		if _, ok := Elements([]byte(refused)); ok {
+			t.Fatalf("Elements admits %s", refused)
+		}
+	}
+}
+
 func check(t *testing.T, raw []byte) {
 	t.Helper()
+	if elements, ok := Elements(raw); ok {
+		var want []json.RawMessage
+		if err := json.Unmarshal(raw, &want); err != nil || len(want) != len(elements) {
+			t.Fatalf("Elements admits %q with %d elements; encoding/json answers %d, %v", raw, len(elements), len(want), err)
+		}
+		for i := range elements {
+			if string(want[i]) != string(elements[i]) {
+				t.Fatalf("Elements answers %s at %d in %q; encoding/json %s", elements[i], i, raw, want[i])
+			}
+		}
+	}
 	if fields, ok := Fields(raw); ok {
 		var want map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &want); err != nil || len(want) != len(fields) {

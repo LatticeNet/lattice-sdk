@@ -73,6 +73,28 @@ func Fields(raw []byte) (fields []Field, ok bool) {
 	return fields, true
 }
 
+// Elements answers the elements of the array raw holds, in order, when raw is
+// an array Valid admits; ok is false otherwise. Each element aliases raw. A
+// reader that wants each element's own bytes (its size as received, say)
+// takes them from here instead of encoding the decoded element again.
+func Elements(raw []byte) (elements [][]byte, ok bool) {
+	s := getScanner(raw, nil)
+	s.elements = &elements
+	defer putScanner(s)
+	s.space()
+	if s.pos >= len(s.data) || s.data[s.pos] != '[' || !s.value() {
+		return nil, false
+	}
+	s.space()
+	if s.pos != len(s.data) {
+		return nil, false
+	}
+	if elements == nil {
+		elements = [][]byte{}
+	}
+	return elements, true
+}
+
 // Compact reports whether raw is a value Valid admits with no whitespace
 // outside its strings, so that json.Compact would leave it as it is. An
 // encoder that splices such a value into its output in place of a
@@ -95,6 +117,8 @@ type scanner struct {
 	keys [][]keyRef
 	// top, when set, collects the members of the top-level object.
 	top *[]Field
+	// elements, when set, collects the elements of the top-level array.
+	elements *[][]byte
 }
 
 // keyRef is one object key: its bytes in data when they are already its
@@ -120,7 +144,7 @@ func putScanner(s *scanner) {
 		clear(keys[:cap(keys)])
 		s.keys[i] = keys[:0]
 	}
-	s.data, s.top = nil, nil
+	s.data, s.top, s.elements = nil, nil, nil
 	scanners.Put(s)
 }
 
@@ -302,9 +326,14 @@ func (s *scanner) array() bool {
 		s.depth--
 		return true
 	}
+	depth := s.depth
 	for {
+		elementStart := s.pos
 		if !s.value() {
 			return false
+		}
+		if depth == 1 && s.elements != nil {
+			*s.elements = append(*s.elements, s.data[elementStart:s.pos])
 		}
 		s.space()
 		if s.pos >= len(s.data) {

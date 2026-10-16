@@ -429,15 +429,28 @@ func (r LineCatalogueRow) validate() (int, error) {
 	return size, r.checkSize(size)
 }
 
-// ValidateEncoded is Validate for a row the caller has just encoded: raw
-// must be json.Marshal(r), and the size bound is read from it instead of
-// from a second encoding. Core encodes every row it serves, so it validates
-// with this and encodes each row once.
-func (r LineCatalogueRow) ValidateEncoded(raw []byte) error {
+// ValidateTrustingEncoding is Validate for a row the caller has just
+// encoded: the size bound is read from raw instead of from a second
+// encoding, on the caller's word that raw is json.Marshal(r). Passed other
+// bytes, it bounds those bytes all the same. An empty raw is no encoding,
+// and the row is encoded and bounded as Validate does. Core encodes every
+// row it serves, so it validates with this and encodes each row once.
+func (r LineCatalogueRow) ValidateTrustingEncoding(raw []byte) error {
+	if len(raw) == 0 {
+		return r.Validate()
+	}
 	if err := r.validateFields(); err != nil {
 		return err
 	}
 	return r.checkSize(len(raw))
+}
+
+// ValidateFields is Validate without the size bound: every check of the
+// row's fields and nothing that needs its encoding. It is for a caller that
+// bounds the row's size another way, or that checks one value on a row far
+// under the bound.
+func (r LineCatalogueRow) ValidateFields() error {
+	return r.validateFields()
 }
 
 func (r LineCatalogueRow) checkSize(size int) error {
@@ -978,21 +991,26 @@ func DecodeLineCatalogueRequest(raw []byte) (LineCatalogueRequest, error) {
 // most MaxLineCataloguePageBytes.
 func (r LineCatalogueResponse) Validate() error {
 	return r.validatePage(func(i int) (int, error) { return r.Rows[i].validate() }, func(rowBytes int) (int, error) {
-		// The page encodes as its envelope with an empty rows array, plus
-		// each row's own encoding and a comma between rows; encoding/json
-		// writes a slice element exactly as it writes the value alone.
-		// Summing the rows already encoded avoids encoding the whole page a
-		// second time.
-		envelope := r
-		if len(r.Rows) > 0 {
-			envelope.Rows = []LineCatalogueRow{}
-		}
-		head, err := json.Marshal(envelope)
+		head, err := r.envelopeBytes()
 		if err != nil {
 			return 0, err
 		}
-		return len(head) + rowBytes + max(len(r.Rows)-1, 0), nil
+		return head + rowBytes + max(len(r.Rows)-1, 0), nil
 	})
+}
+
+// envelopeBytes is the length of the page's encoding without its rows. The
+// page encodes as its envelope with an empty rows array, plus each row's own
+// encoding and a comma between rows; encoding/json writes a slice element
+// exactly as it writes the value alone, so summing rows already measured
+// avoids encoding the whole page a second time.
+func (r LineCatalogueResponse) envelopeBytes() (int, error) {
+	envelope := r
+	if len(r.Rows) > 0 {
+		envelope.Rows = []LineCatalogueRow{}
+	}
+	head, err := json.Marshal(envelope)
+	return len(head), err
 }
 
 // validatePage is Validate with the way a row is validated and sized, and
@@ -1045,12 +1063,72 @@ func (r LineCatalogueResponse) validatePage(row func(i int) (int, error), page f
 // arrived.
 type ReceivedLineCataloguePage struct {
 	LineCatalogueResponse
-	// PageBytes is the length of the page as received. RowBytes[i] is the
-	// length of row i's encoding within it; RowBytes is nil when the page
-	// was read without them, and Validate then measures as
-	// LineCatalogueResponse.Validate does.
-	PageBytes int
-	RowBytes  []int
+	// pageBytes is the length of the page as received. rowBytes[i] is the
+	// length of row i's own bytes within it. rowCanonical[i] is the length of
+	// the row's encoding, or -1 when the row's bytes passed
+	// rowReencodesWithinGrowth and the encoding is known to be at most
+	// rowBytes[i]+maxReceivedRowGrowth. rowBytes is nil when the page was
+	// read without them, and Validate then measures as
+	// LineCatalogueResponse.Validate does. Only ReadLineCataloguePage sets
+	// them, so a page built by hand is always measured.
+	pageBytes    int
+	rowBytes     []int
+	rowCanonical []int
+}
+
+// Sized reports whether the page was read with its row sizes (the one-pass
+// read of ReadLineCataloguePage), so that Validate bounds it without
+// encoding every row again.
+func (p ReceivedLineCataloguePage) Sized() bool {
+	return p.rowBytes != nil
+}
+
+// maxReceivedRowGrowth bounds how much longer than it arrived a row encodes
+// once its bytes pass rowReencodesWithinGrowth. encoding/json then writes
+// nothing the bytes did not carry except the members it always writes and a
+// valid row may leave out: probe as null, or a probe's at and
+// consecutive_failures; a usage's used_bytes; the updated_at of geo and of
+// the chain's exit_geo. Together those are 138 bytes;
+// TestReceivedRowGrowsAtMostTheBound holds a row leaving out every one of
+// them to this bound.
+const maxReceivedRowGrowth = 256
+
+// rowReencodesWithinGrowth reports whether a row's bytes, decoded and
+// encoded again by encoding/json, can grow only by the members they leave
+// out (maxReceivedRowGrowth): they are valid UTF-8 (encoding/json replaces
+// an invalid byte with U+FFFD), carry no byte encoding/json escapes ('<',
+// '>', '&', U+2028, U+2029; each becomes six bytes), and write no number in
+// exponent form (a float written 1e20 encodes as 21 digits). Escapes and
+// whitespace in the bytes only shrink the encoding.
+func rowReencodesWithinGrowth(raw []byte) bool {
+	if !utf8.Valid(raw) {
+		return false
+	}
+	inString, escaped := false, false
+	for i, c := range raw {
+		switch {
+		case escaped:
+			escaped = false
+		case inString:
+			switch c {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			case '<', '>', '&':
+				return false
+			case 0xe2:
+				if i+2 < len(raw) && raw[i+1] == 0x80 && (raw[i+2] == 0xa8 || raw[i+2] == 0xa9) {
+					return false
+				}
+			}
+		case c == '"':
+			inString = true
+		case (c == 'e' || c == 'E') && i > 0 && raw[i-1] >= '0' && raw[i-1] <= '9':
+			return false
+		}
+	}
+	return true
 }
 
 // lineCataloguePageMembers are LineCatalogueResponse's JSON names.
@@ -1072,7 +1150,7 @@ func ReadLineCataloguePage(raw []byte) (ReceivedLineCataloguePage, error) {
 	if err := json.Unmarshal(raw, &page.LineCatalogueResponse); err != nil {
 		return ReceivedLineCataloguePage{}, err
 	}
-	page.PageBytes = len(raw)
+	page.pageBytes = len(raw)
 	return page, nil
 }
 
@@ -1081,7 +1159,7 @@ func readLineCataloguePageFast(raw []byte) (ReceivedLineCataloguePage, bool) {
 	if !ok {
 		return ReceivedLineCataloguePage{}, false
 	}
-	page := ReceivedLineCataloguePage{PageBytes: len(raw)}
+	page := ReceivedLineCataloguePage{pageBytes: len(raw)}
 	for _, f := range fields {
 		if !lineCataloguePageMembers[f.Key] {
 			return ReceivedLineCataloguePage{}, false
@@ -1098,7 +1176,7 @@ func readLineCataloguePageFast(raw []byte) (ReceivedLineCataloguePage, bool) {
 			err = json.Unmarshal(f.Value, &page.Unavailable)
 		case "rows":
 			if string(f.Value) == "null" {
-				page.Rows, page.RowBytes = nil, nil
+				page.Rows, page.rowBytes, page.rowCanonical = nil, nil, nil
 				continue
 			}
 			elements, ok := strictjson.Elements(f.Value)
@@ -1106,13 +1184,21 @@ func readLineCataloguePageFast(raw []byte) (ReceivedLineCataloguePage, bool) {
 				return ReceivedLineCataloguePage{}, false
 			}
 			page.Rows = make([]LineCatalogueRow, len(elements))
-			page.RowBytes = make([]int, len(elements))
+			page.rowBytes = make([]int, len(elements))
+			page.rowCanonical = make([]int, len(elements))
 			failed := make([]bool, len(elements))
 			// Rows decode independently, so a full page decodes in
-			// parallel.
+			// parallel. A row whose bytes could encode longer than they
+			// arrived by more than the members they leave out, or one so
+			// close to the row bound that those members matter, is
+			// measured by encoding it; core's rows are neither.
 			eachIndex(len(elements), func(i int) {
 				failed[i] = json.Unmarshal(elements[i], &page.Rows[i]) != nil
-				page.RowBytes[i] = len(elements[i])
+				page.rowBytes[i], page.rowCanonical[i] = len(elements[i]), -1
+				if !failed[i] && (len(elements[i])+maxReceivedRowGrowth > MaxLineCatalogueRowBytes || !rowReencodesWithinGrowth(elements[i])) {
+					n, err := encodedLength(page.Rows[i])
+					failed[i], page.rowCanonical[i] = err != nil, n
+				}
 			})
 			for _, f := range failed {
 				if f {
@@ -1128,23 +1214,53 @@ func readLineCataloguePageFast(raw []byte) (ReceivedLineCataloguePage, bool) {
 }
 
 // Validate is LineCatalogueResponse.Validate with the row and page bounds
-// read from the sizes the page arrived with: every row's fields are checked
-// as Validate checks them, and its size is the length of its own bytes in
-// the page, as is the page's. A page the core encoded is its own
-// re-encoding byte for byte, so the bounds are the ones Validate computes;
-// a page that is not (whitespace, other escapes) is bounded by what arrived,
-// which is what the reader holds. Without row sizes it is Validate.
+// read from the sizes the page arrived with where those sizes prove them:
+// every row's fields are checked as Validate checks them, and each row and
+// the page are held to their bounds both as they arrived (what the reader
+// holds) and as encoding/json encodes them (what Validate bounds). A row
+// whose bytes cannot encode longer than they arrived by more than
+// maxReceivedRowGrowth is bounded by its received length; any other row was
+// measured when it was read. The page is bounded by its received length and
+// by its encoding, taken as the envelope plus each row's encoded length, or
+// its received length plus the growth bound; only a page whose growth bound
+// crosses the page bound has its remaining rows encoded. A page the core
+// encoded is its own re-encoding byte for byte, so the verdict and its words
+// are Validate's. Without row sizes it is Validate.
 func (p ReceivedLineCataloguePage) Validate() error {
-	if p.RowBytes == nil && len(p.Rows) > 0 || len(p.RowBytes) != len(p.Rows) {
+	if p.rowBytes == nil && len(p.Rows) > 0 || len(p.rowBytes) != len(p.Rows) || len(p.rowCanonical) != len(p.Rows) {
 		return p.LineCatalogueResponse.Validate()
 	}
+	exact := true
 	return p.validatePage(func(i int) (int, error) {
 		row := p.Rows[i]
 		if err := row.validateFields(); err != nil {
 			return 0, err
 		}
-		return p.RowBytes[i], row.checkSize(p.RowBytes[i])
-	}, func(int) (int, error) { return p.PageBytes, nil })
+		if n := p.rowCanonical[i]; n >= 0 {
+			return n, row.checkSize(max(n, p.rowBytes[i]))
+		}
+		exact = false
+		return p.rowBytes[i] + maxReceivedRowGrowth, row.checkSize(p.rowBytes[i])
+	}, func(rowBytes int) (int, error) {
+		head, err := p.envelopeBytes()
+		if err != nil {
+			return 0, err
+		}
+		size := head + rowBytes + max(len(p.Rows)-1, 0)
+		if size > MaxLineCataloguePageBytes && !exact {
+			size = head + max(len(p.Rows)-1, 0)
+			for i := range p.Rows {
+				n := p.rowCanonical[i]
+				if n < 0 {
+					if n, err = encodedLength(p.Rows[i]); err != nil {
+						return 0, err
+					}
+				}
+				size += n
+			}
+		}
+		return max(size, p.pageBytes), nil
+	})
 }
 
 func jsonFieldName(field reflect.StructField) string {

@@ -330,24 +330,27 @@ func (p SelectionPlan) Validate() error {
 	return p.validate(false)
 }
 
-// ValidateEncoded is Validate for a plan the caller has just encoded: raw
-// must be the plan's encoding (json.Marshal of p, or bytes equal to it). One
-// duplicate-key pass over raw then stands in for the pass over every node,
-// and a node only has to open an object, because raw holding it is valid. A
-// raw that pass does not admit is judged by Validate, which words the error.
-func (p SelectionPlan) ValidateEncoded(raw []byte) error {
+// ValidateTrustingEncoding is Validate for a plan the caller has just
+// encoded, on the caller's word that raw is the plan's encoding (json.Marshal
+// of p, or bytes equal to it): one duplicate-key pass over raw stands in for
+// the pass over every node, and a node only has to open an object, because
+// raw holding it is valid. Passed bytes that are not the plan's encoding but
+// pass that one pass, it skips the per-node checks all the same; the name
+// says so at every call. A raw the pass does not admit, an empty one
+// included, is judged by Validate, which words the error.
+func (p SelectionPlan) ValidateTrustingEncoding(raw []byte) error {
 	if !strictjson.Valid(raw) {
 		return p.Validate()
 	}
 	return p.validate(true)
 }
 
-// ValidateWellFormedNodes is Validate for a plan whose every node the caller
-// has already proven a well-formed JSON object with no duplicate key at any
-// depth (strictjson.Valid or strictjson.Compact admitted it): each node then
-// only has to open an object, and nothing is scanned again. The plugin
-// proves its nodes so as it encodes them, in parallel.
-func (p SelectionPlan) ValidateWellFormedNodes() error {
+// ValidateTrustingWellFormedNodes is Validate on the caller's word that every
+// node is a well-formed JSON object with no duplicate key at any depth
+// (strictjson.Valid or strictjson.CanonicalRaw admitted it): each node then
+// only has to open an object, and no node is scanned again. The plugin proves
+// its nodes so as it encodes them, in parallel.
+func (p SelectionPlan) ValidateTrustingWellFormedNodes() error {
 	return p.validate(true)
 }
 

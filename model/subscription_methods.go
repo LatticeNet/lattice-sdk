@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/LatticeNet/lattice-sdk/strictjson"
 )
 
 // The core calls three methods of a subscription plugin's
@@ -350,22 +352,90 @@ func DecodeConvertRequest(raw []byte) (ConvertRequest, error) {
 	if len(raw) == 0 || len(raw) > MaxConvertRequestBytes {
 		return ConvertRequest{}, errors.New("invalid convert request size")
 	}
-	if err := rejectDuplicateJSONFields(raw); err != nil {
-		return ConvertRequest{}, err
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	var req ConvertRequest
-	if err := decoder.Decode(&req); err != nil {
-		return ConvertRequest{}, err
-	}
-	if err := requireJSONEOF(decoder); err != nil {
-		return ConvertRequest{}, err
+	req, fast := decodeConvertRequestFast(raw)
+	if !fast {
+		if err := rejectDuplicateJSONFields(raw); err != nil {
+			return ConvertRequest{}, err
+		}
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		req = ConvertRequest{}
+		if err := decoder.Decode(&req); err != nil {
+			return ConvertRequest{}, err
+		}
+		if err := requireJSONEOF(decoder); err != nil {
+			return ConvertRequest{}, err
+		}
 	}
 	if err := req.Validate(); err != nil {
 		return ConvertRequest{}, err
 	}
 	return req, nil
+}
+
+// decodeConvertRequestFast is DecodeConvertRequest's decode for the plain
+// case: a request strictjson reads in one pass (no duplicate key at any
+// depth) whose members are named exactly as ConvertRequest's. Each member
+// decodes on its own, a struct member with unknown fields still refused as
+// the whole decode refuses them, and each bound node is copied from its own
+// bytes rather than scanned again; a convert request is several MiB of
+// nodes. ok is false for anything else, and the caller runs the strict
+// decode, which decides and words every error.
+func decodeConvertRequestFast(raw []byte) (ConvertRequest, bool) {
+	fields, ok := strictjson.Fields(raw)
+	if !ok {
+		return ConvertRequest{}, false
+	}
+	var req ConvertRequest
+	for _, f := range fields {
+		var err error
+		switch f.Key {
+		case "uris":
+			err = json.Unmarshal(f.Value, &req.URIs)
+		case "raw":
+			err = json.Unmarshal(f.Value, &req.Raw)
+		case "target":
+			err = json.Unmarshal(f.Value, &req.Target)
+		case "format":
+			err = json.Unmarshal(f.Value, &req.Format)
+		case "options":
+			err = json.Unmarshal(f.Value, &req.Options)
+		case "nodes":
+			if string(f.Value) == "null" {
+				req.Nodes = nil
+				continue
+			}
+			elements, ok := strictjson.Elements(f.Value)
+			if !ok {
+				return ConvertRequest{}, false
+			}
+			req.Nodes = make([]json.RawMessage, len(elements))
+			for i, element := range elements {
+				req.Nodes[i] = append(json.RawMessage(nil), element...)
+			}
+		case "document":
+			err = decodeStrictMember(f.Value, &req.Document)
+		case "response_chain":
+			err = decodeStrictMember(f.Value, &req.ResponseChain)
+		default:
+			return ConvertRequest{}, false
+		}
+		if err != nil {
+			return ConvertRequest{}, false
+		}
+	}
+	return req, true
+}
+
+// decodeStrictMember decodes one member as the strict whole-request decode
+// would reach it: unknown fields refused in any struct inside it.
+func decodeStrictMember(raw []byte, v any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(v); err != nil {
+		return err
+	}
+	return requireJSONEOF(decoder)
 }
 
 // Validate checks a convert reply: content present and every log level known.

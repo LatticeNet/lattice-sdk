@@ -130,6 +130,10 @@ const (
 	LatencyReasonConfigOff     = "config_off"
 	LatencyReasonPairsOff      = "pairs_off"
 	LatencyReasonNoSource      = "no_source"
+	// LatencyReasonSourceMethod: paused because every enabled pair to the
+	// target is held by its source's method (its agent does not run the
+	// kind, or its host refuses it); each pair's Reason says which.
+	LatencyReasonSourceMethod = "source_method"
 )
 
 // What the port rule found on a target (LatencyProbeNode.EndpointNote).

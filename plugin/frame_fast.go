@@ -1,7 +1,6 @@
 package plugin
 
 import (
-	"bytes"
 	"encoding/json"
 	"strconv"
 
@@ -144,15 +143,6 @@ func callPayloadFast(raw []byte) (CallPayload, bool) {
 	return call, true
 }
 
-// canonicalRawJSON reports whether raw is already what encoding/json writes
-// for a json.RawMessage holding it: compact, and free of the bytes it
-// escapes ('<', '>', '&', U+2028, U+2029). Those bytes cannot occur outside
-// a string, so a search of the whole value is enough.
-func canonicalRawJSON(raw []byte) bool {
-	return strictjson.Compact(raw) && !bytes.ContainsAny(raw, "<>&") &&
-		!bytes.Contains(raw, []byte("\u2028")) && !bytes.Contains(raw, []byte("\u2029"))
-}
-
 // appendJSONValue appends v as json.Marshal writes it; the values passed (a
 // string, a string slice) cannot fail to encode.
 func appendJSONValue(dst []byte, v any) []byte {
@@ -167,7 +157,7 @@ func appendJSONValue(dst []byte, v any) []byte {
 // json.Marshal already wrote in that form. ok is false when Result is not
 // already canonical, and the caller encodes the frame.
 func appendInvokeResultFrame(dst []byte, generation uint64, invocationID string, resp Response) ([]byte, bool) {
-	if len(resp.Result) > 0 && !canonicalRawJSON(resp.Result) {
+	if len(resp.Result) > 0 && !strictjson.CanonicalRaw(resp.Result) {
 		return dst, false
 	}
 	dst = append(dst, `{"protocol":2,"kind":"invoke_result","generation":`...)

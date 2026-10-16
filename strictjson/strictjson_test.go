@@ -100,6 +100,42 @@ var cases = []string{
 	`{"A":1,"a":2}`, `{"a":[{"a":1,"b":{"a":2,"a":3}}]}`, `[[[[[[[[[[]]]]]]]]]]`, `{"a":"}","a":"]"}`, `{"a":"\"","b":"\\"}`,
 }
 
+// keyFormCases are duplicates that only decoding finds: one key written
+// plainly and the same key escaped, in both orders, the same key as UTF-8
+// and as its escape, a surrogate pair against the character it encodes, and
+// a lone surrogate against the U+FFFD it decodes to. Each pairs with a near
+// miss that is not a duplicate. The scanner compares a plain key by its bytes
+// and an escaped one by its decoded form, so every mix of the two is here.
+var keyFormCases = []string{
+	`{"a":1,"\u0061":2}`, `{"\u0061":1,"a":2}`, `{"a":1,"\u0062":2}`, `{"\u0062":1,"a":2}`,
+	`{"ab":1,"a\u0062":2}`, `{"a\u0062":1,"ab":2}`, `{"a/":1,"a\/":2}`, `{"a\/":1,"a/":2}`,
+	`{"é":1,"\u00e9":2}`, `{"\u00e9":1,"é":2}`, `{"é":1,"\u00e8":2}`, `{"\u00e9":1,"\u00e9":2}`,
+	`{"😀":1,"\ud83d\ude00":2}`, `{"\ud83d\ude00":1,"😀":2}`, `{"\ud83d\ude00":1,"\ud83d\ude01":2}`,
+	`{"\ud83d\ude00":1,"\uD83D\uDE00":2}`, "{\"\\ud800\":1,\"\xef\xbf\xbd\":2}", "{\"\xef\xbf\xbd\":1,\"\\udc00\":2}",
+	`{"\ud800":1,"\udc00":2}`, `{"\ud800x":1,"\ufffdx":2}`, `{"x":{"a":1,"\u0061":2}}`, `[{"a":1},{"\u0061":1,"a":2}]`,
+	`{"a":"\ud83d\ude00","b":"😀"}`, `{"a":"\ud800","b":"\udc00\ud800"}`,
+}
+
+func TestValidSeesADuplicateWrittenInTwoForms(t *testing.T) {
+	for _, c := range keyFormCases {
+		check(t, []byte(c))
+	}
+	for _, dup := range []string{`{"a":1,"\u0061":2}`, `{"\u0061":1,"a":2}`, `{"é":1,"\u00e9":2}`, `{"\u00e9":1,"é":2}`,
+		`{"😀":1,"\ud83d\ude00":2}`, `{"\ud83d\ude00":1,"😀":2}`, "{\"\\ud800\":1,\"\xef\xbf\xbd\":2}", `{"\ud800":1,"\udc00":2}`} {
+		if Valid([]byte(dup)) {
+			t.Errorf("Valid admits %s, whose keys decode to the same string", dup)
+		}
+		if _, ok := Fields([]byte(dup)); ok {
+			t.Errorf("Fields admits %s", dup)
+		}
+	}
+	for _, distinct := range []string{`{"a":1,"\u0062":2}`, `{"\u0062":1,"a":2}`, `{"é":1,"\u00e8":2}`, `{"\ud83d\ude00":1,"\ud83d\ude01":2}`} {
+		if !Valid([]byte(distinct)) {
+			t.Errorf("Valid refuses %s, whose keys differ", distinct)
+		}
+	}
+}
+
 func TestValidAgreesWithTheSpecification(t *testing.T) {
 	for _, c := range cases {
 		check(t, []byte(c))
@@ -116,7 +152,7 @@ func TestValidSeesDuplicatesPastTheLinearKeyRun(t *testing.T) {
 	if !Valid([]byte(ok)) {
 		t.Fatal("an object of distinct keys past the linear run is refused")
 	}
-	for _, dup := range []string{"k0", fmt.Sprintf("k%d", linearKeys-1), fmt.Sprintf("k%d", linearKeys), fmt.Sprintf("k%d", 2*linearKeys)} {
+	for _, dup := range []string{"k0", fmt.Sprintf("k%d", linearKeys-1), fmt.Sprintf("k%d", linearKeys), fmt.Sprintf("k%d", 2*linearKeys), `\u006b0`, `k\u0031`} {
 		if raw := b.String() + `"` + dup + `":0}`; Valid([]byte(raw)) {
 			t.Fatalf("a repeat of %s after %d keys is admitted", dup, 3*linearKeys)
 		}
@@ -133,6 +169,27 @@ func TestCompactAdmitsOnlyWhatJSONCompactLeavesAlone(t *testing.T) {
 	} {
 		if got := Compact([]byte(raw)); got != want {
 			t.Fatalf("Compact(%q) = %v, want %v", raw, got, want)
+		}
+	}
+}
+
+// CanonicalRaw admits only what json.Marshal writes back unchanged for a
+// json.RawMessage, so a splice of an admitted value is json.Marshal's bytes.
+func TestCanonicalRawIsWhatJSONMarshalLeavesAlone(t *testing.T) {
+	for raw, want := range map[string]bool{
+		`{"a":[1,{"b":"x y"}]}`: true, `"é中😀"`: true, `{"a":"\u003c"}`: true, `{"a": 1}`: false, `{"a":"<"}`: false,
+		`{"a":">"}`: false, `{"a":"&"}`: false, "{\"a\":\"\u2028\"}": false, "{\"a\":\"\u2029\"}": false, `{"a":1,"a":2}`: false, `[1,]`: false,
+	} {
+		if got := CanonicalRaw([]byte(raw)); got != want {
+			t.Errorf("CanonicalRaw(%q) = %v, want %v", raw, got, want)
+		}
+	}
+	for _, c := range append(cases, keyFormCases...) {
+		if !CanonicalRaw([]byte(c)) {
+			continue
+		}
+		if out, err := json.Marshal(json.RawMessage(c)); err != nil || string(out) != c {
+			t.Errorf("CanonicalRaw admits %q, which json.Marshal writes as %q (%v)", c, out, err)
 		}
 	}
 }
@@ -235,7 +292,7 @@ func check(t *testing.T, raw []byte) {
 }
 
 func FuzzValidAgreesWithTheSpecification(f *testing.F) {
-	for _, c := range cases {
+	for _, c := range append(cases, keyFormCases...) {
 		f.Add([]byte(c))
 	}
 	f.Add([]byte(`{"kind":"nodes","nodes":[{"line_uuid":"581ff4e6-e0a4-4f5c-9d2a-0b0c0d0e0f10","placeholders":{"uuid":"LATTICE-SYN-x"},"node":{"name":"a","type":"vless","port":443,"reality-opts":{"public-key":"k"}}}]}`))

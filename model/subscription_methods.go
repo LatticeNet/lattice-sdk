@@ -368,7 +368,7 @@ func encodeConvertRequestSpliced(r ConvertRequest) (raw []byte, spliced bool, er
 	}
 	size := 0
 	for _, node := range r.Nodes {
-		if len(node) == 0 || node[0] != '{' || !canonicalRawJSON(node) {
+		if len(node) == 0 || node[0] != '{' || !strictjson.CanonicalRaw(node) {
 			return nil, false, nil
 		}
 		size += len(node) + 1
@@ -406,15 +406,6 @@ func encodeConvertRequestSpliced(r ConvertRequest) (raw []byte, spliced bool, er
 	}
 	out = append(out, ']')
 	return append(out, head[at+len(slot):]...), true, nil
-}
-
-// canonicalRawJSON reports whether raw is already what encoding/json writes
-// for a json.RawMessage holding it: compact, and free of the bytes it
-// escapes ('<', '>', '&', U+2028, U+2029), none of which can occur outside a
-// string.
-func canonicalRawJSON(raw []byte) bool {
-	return strictjson.Compact(raw) && !bytes.ContainsAny(raw, "<>&") &&
-		!bytes.Contains(raw, []byte("\u2028")) && !bytes.Contains(raw, []byte("\u2029"))
 }
 
 // DecodeConvertRequest decodes a convert request as strictly as the plugin

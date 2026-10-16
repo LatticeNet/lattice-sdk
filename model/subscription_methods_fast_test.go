@@ -106,6 +106,21 @@ func TestEncodeConvertRequestIsValidateAndJSONMarshal(t *testing.T) {
 	}
 }
 
+// The splice finds the nodes by the slot's text in json.Marshal's encoding
+// of the rest. A step's arguments are raw JSON and may carry that same text;
+// the request is then not spliced at all, so no member order can put the
+// nodes inside another member.
+func TestEncodeConvertRequestNeverSplicesAtASecondSlot(t *testing.T) {
+	for _, arguments := range []string{`{"nodes":["\u0000nodes"]}`, `{"a":{"nodes":["\u0000nodes"]},"b":"\u0000nodes"}`} {
+		r := ConvertRequest{Target: "URI", Nodes: []json.RawMessage{json.RawMessage(`{"name":"a"}`), json.RawMessage(`{"name":"b"}`)},
+			ResponseChain: []ResponseTransformerStep{{Source: "s", Enabled: true, Arguments: json.RawMessage(arguments)}}}
+		if _, spliced, err := encodeConvertRequestSpliced(r); err != nil || spliced {
+			t.Fatalf("arguments %s: spliced %v, %v; the slot's text occurs twice", arguments, spliced, err)
+		}
+		sameConvertEncode(t, r)
+	}
+}
+
 func FuzzEncodeConvertRequestIsValidateAndJSONMarshal(f *testing.F) {
 	f.Add([]byte(`{"name":"a"}`), "sing-box", "plain")
 	f.Add([]byte(` {"a" : "<"} `), "", "")
@@ -170,7 +185,7 @@ func sameSnapshotWire(t *testing.T, raw []byte) {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	var want snapshotWire
+	var want wire
 	if err := decoder.Decode(&want); err != nil {
 		t.Fatalf("snapshot %q: the fast decode admits what the strict decode refuses: %v", raw, err)
 	}

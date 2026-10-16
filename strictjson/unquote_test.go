@@ -22,6 +22,23 @@ var stringCorpus = []string{
 	`""`, `"plain"`, `"a\"b\\c\/d\be\ff\ng\rh\ti"`, `"Aé中"`, `"😀"`, `"\ud800"`, `"\udc00x"`, `"\ud800A"`,
 	`"\ud800\ud800"`, `"􏿿"`, "\"\xff\xfe\"", "\"é中\"", "\"a\tb\"", `"\x"`, `"\u12"`, `"\u12g4"`, `"\'"`, `"a"b"`, `"abc`, `abc"`,
 	`"`, `""x`, "\"\x7f\"", "\"\xed\xa0\x80\"", `"{\"version\":2,\"rows\":[{\"line_uuid\":\"a\"}]}"`,
+	// Surrogate pairs written as escapes join to one character; a lone
+	// surrogate, or one paired with a non-surrogate, is U+FFFD.
+	`"\ud83d\ude00"`, `"\uD834\uDD1E"`, `"x\ud83d\ude00y"`, `"\udbff\udfff"`, `"\ud800\udc00"`, `"\ud800\u0041"`,
+	`"\udc00\ud800"`, `"\ud83d"`, `"\ud83dx"`, `"\ud83d\n"`, `"\ud83d\ud83d\ude00"`, `"\ude00\ud83d"`, `"a\u00e9\u4e2d\ud83d\ude00"`,
+}
+
+// TestStringJoinsEscapedSurrogatePairs names the cases a decoder that
+// stopped joining pairs would get wrong.
+func TestStringJoinsEscapedSurrogatePairs(t *testing.T) {
+	for raw, want := range map[string]string{
+		`"\ud83d\ude00"`: "\U0001F600", `"x\uD834\uDD1Ey"`: "x\U0001D11Ey", `"\ud800"`: "\uFFFD", `"\ud800\u0041"`: "\uFFFDA",
+		`"\udc00\ud800"`: "\uFFFD\uFFFD", `"\ud83d\ud83d\ude00"`: "\uFFFD\U0001F600",
+	} {
+		if got, ok := String([]byte(raw)); !ok || got != want {
+			t.Errorf("String(%s) = %q, %v; want %q", raw, got, ok, want)
+		}
+	}
 }
 
 func TestStringIsJSONUnmarshal(t *testing.T) {

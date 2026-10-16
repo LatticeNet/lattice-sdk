@@ -107,6 +107,23 @@ func Compact(raw []byte) bool {
 	return s.value() && s.pos == len(s.data) && !s.spaced
 }
 
+// CanonicalRaw reports whether raw is already what encoding/json writes for
+// a json.RawMessage holding it: a value Compact admits, free of the bytes
+// encoding/json escapes ('<', '>', '&', U+2028 and U+2029), none of which
+// can occur outside a string. An encoder that splices such a value into its
+// output in place of a json.RawMessage writes json.Marshal's bytes.
+func CanonicalRaw(raw []byte) bool {
+	return Compact(raw) && !bytes.ContainsAny(raw, "<>&") &&
+		!bytes.Contains(raw, lineSeparator) && !bytes.Contains(raw, paragraphSeparator)
+}
+
+// lineSeparator and paragraphSeparator are U+2028 and U+2029 in UTF-8,
+// which encoding/json writes as \u2028 and \u2029.
+var (
+	lineSeparator      = []byte("\u2028")
+	paragraphSeparator = []byte("\u2029")
+)
+
 type scanner struct {
 	data   []byte
 	pos    int

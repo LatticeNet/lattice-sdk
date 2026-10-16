@@ -467,22 +467,106 @@ func DecodeSelectionPlan(raw []byte) (SelectionPlan, error) {
 	if len(raw) == 0 || len(raw) > MaxSelectionPlanBytes {
 		return SelectionPlan{}, errors.New("invalid plan size")
 	}
-	if err := rejectDuplicateJSONFields(raw); err != nil {
-		return SelectionPlan{}, err
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	var plan SelectionPlan
-	if err := decoder.Decode(&plan); err != nil {
-		return SelectionPlan{}, err
-	}
-	if err := requireJSONEOF(decoder); err != nil {
-		return SelectionPlan{}, err
+	plan, fast := decodeSelectionPlanFast(raw)
+	if !fast {
+		if err := rejectDuplicateJSONFields(raw); err != nil {
+			return SelectionPlan{}, err
+		}
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		plan = SelectionPlan{}
+		if err := decoder.Decode(&plan); err != nil {
+			return SelectionPlan{}, err
+		}
+		if err := requireJSONEOF(decoder); err != nil {
+			return SelectionPlan{}, err
+		}
 	}
 	if err := plan.validate(true); err != nil {
 		return SelectionPlan{}, err
 	}
 	return plan, nil
+}
+
+// decodeSelectionPlanFast is DecodeSelectionPlan's decode for the plain
+// case: a plan strictjson reads in one pass whose members, and whose nodes'
+// members, are named exactly as SelectionPlan's and SelectionPlanNode's.
+// Each node's object is copied from its own bytes rather than scanned again
+// by a Decoder; a 1000-node plan is most of a megabyte, and core decodes it
+// on every bind. A struct member (the selection, the policy, the response
+// chain) still decodes with unknown fields refused. ok is false for anything
+// else, and the caller runs the strict decode, which decides and words every
+// error.
+func decodeSelectionPlanFast(raw []byte) (SelectionPlan, bool) {
+	fields, ok := strictjson.Fields(raw)
+	if !ok {
+		return SelectionPlan{}, false
+	}
+	var plan SelectionPlan
+	for _, f := range fields {
+		var err error
+		switch f.Key {
+		case "kind":
+			err = json.Unmarshal(f.Value, &plan.Kind)
+		case "document":
+			err = json.Unmarshal(f.Value, &plan.Document)
+		case "nodes":
+			if string(f.Value) == "null" {
+				plan.Nodes = nil
+				continue
+			}
+			elements, ok := strictjson.Elements(f.Value)
+			if !ok {
+				return SelectionPlan{}, false
+			}
+			plan.Nodes = make([]SelectionPlanNode, len(elements))
+			for i, element := range elements {
+				if !decodePlanNodeFast(element, &plan.Nodes[i]) {
+					return SelectionPlan{}, false
+				}
+			}
+		case "response_chain":
+			err = decodeStrictMember(f.Value, &plan.ResponseChain)
+		case "selection":
+			err = decodeStrictMember(f.Value, &plan.Selection)
+		case "policy":
+			err = decodeStrictMember(f.Value, &plan.Policy)
+		default:
+			return SelectionPlan{}, false
+		}
+		if err != nil {
+			return SelectionPlan{}, false
+		}
+	}
+	return plan, true
+}
+
+// decodePlanNodeFast decodes one plan node whose members are named exactly
+// as SelectionPlanNode's, copying its node object.
+func decodePlanNodeFast(raw []byte, node *SelectionPlanNode) bool {
+	fields, ok := strictjson.Fields(raw)
+	if !ok {
+		return false
+	}
+	for _, f := range fields {
+		var err error
+		switch f.Key {
+		case "line_uuid":
+			err = json.Unmarshal(f.Value, &node.LineUUID)
+		case "placeholders":
+			err = json.Unmarshal(f.Value, &node.Placeholders)
+		case "provider":
+			err = json.Unmarshal(f.Value, &node.Provider)
+		case "node":
+			node.Node = append(json.RawMessage(nil), f.Value...)
+		default:
+			return false
+		}
+		if err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // opensObject is isJSONObject for a node already known to be well formed.

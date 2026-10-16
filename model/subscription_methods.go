@@ -332,17 +332,89 @@ func ValidateResponseChain(steps []ResponseTransformerStep) error {
 // EncodeConvertRequest validates a convert request and encodes it, refusing
 // an encoding over MaxConvertRequestBytes.
 func EncodeConvertRequest(r ConvertRequest) ([]byte, error) {
-	if err := r.Validate(); err != nil {
-		return nil, err
-	}
-	raw, err := json.Marshal(r)
+	raw, spliced, err := encodeConvertRequestSpliced(r)
 	if err != nil {
 		return nil, err
+	}
+	if !spliced {
+		if err := r.Validate(); err != nil {
+			return nil, err
+		}
+		if raw, err = json.Marshal(r); err != nil {
+			return nil, err
+		}
 	}
 	if len(raw) > MaxConvertRequestBytes {
 		return nil, fmt.Errorf("convert request encodes to %d bytes, over %d", len(raw), MaxConvertRequestBytes)
 	}
 	return raw, nil
+}
+
+// convertNodesSlot stands in for a convert request's nodes while the rest of
+// it is marshalled.
+var convertNodesSlot = json.RawMessage(`"\u0000nodes"`)
+
+// encodeConvertRequestSpliced is EncodeConvertRequest's validation and
+// encoding for a request whose every node is already canonical (compact,
+// none of the bytes encoding/json escapes), which is what core's binder
+// writes: one pass per node proves it a well-formed object, and the nodes
+// are spliced into json.Marshal's encoding of the rest instead of compacted
+// again, so the bytes are json.Marshal's. spliced is false when any node is
+// not canonical or the slot is not found exactly once, and the caller
+// validates and marshals as before.
+func encodeConvertRequestSpliced(r ConvertRequest) (raw []byte, spliced bool, err error) {
+	if len(r.Nodes) == 0 {
+		return nil, false, nil
+	}
+	size := 0
+	for _, node := range r.Nodes {
+		if len(node) == 0 || node[0] != '{' || !canonicalRawJSON(node) {
+			return nil, false, nil
+		}
+		size += len(node) + 1
+	}
+	// Validate's node check is what the canonical check just did: every node
+	// opens an object and is well formed. The rest is validated on a copy
+	// holding one empty node; a request over the node bound takes the plain
+	// path, which refuses it in Validate's order.
+	if len(r.Nodes) > MaxSubscriptionRecordNodes {
+		return nil, false, nil
+	}
+	checked := r
+	checked.Nodes = []json.RawMessage{json.RawMessage(`{}`)}
+	if err := checked.Validate(); err != nil {
+		return nil, false, err
+	}
+	rest := r
+	rest.Nodes = []json.RawMessage{convertNodesSlot}
+	head, err := json.Marshal(rest)
+	if err != nil {
+		return nil, false, err
+	}
+	slot := []byte(`"nodes":[` + string(convertNodesSlot) + `]`)
+	at := bytes.Index(head, slot)
+	if at < 0 || bytes.Count(head, slot) != 1 {
+		return nil, false, nil
+	}
+	out := make([]byte, 0, len(head)+size)
+	out = append(out, head[:at+len(`"nodes":[`)]...)
+	for i, node := range r.Nodes {
+		if i > 0 {
+			out = append(out, ',')
+		}
+		out = append(out, node...)
+	}
+	out = append(out, ']')
+	return append(out, head[at+len(slot):]...), true, nil
+}
+
+// canonicalRawJSON reports whether raw is already what encoding/json writes
+// for a json.RawMessage holding it: compact, and free of the bytes it
+// escapes ('<', '>', '&', U+2028, U+2029), none of which can occur outside a
+// string.
+func canonicalRawJSON(raw []byte) bool {
+	return strictjson.Compact(raw) && !bytes.ContainsAny(raw, "<>&") &&
+		!bytes.Contains(raw, []byte("\u2028")) && !bytes.Contains(raw, []byte("\u2029"))
 }
 
 // DecodeConvertRequest decodes a convert request as strictly as the plugin

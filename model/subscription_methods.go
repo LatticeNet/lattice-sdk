@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/LatticeNet/lattice-sdk/strictjson"
 )
 
 // The core calls three methods of a subscription plugin's
@@ -111,6 +113,10 @@ type RenderReply struct {
 	ZeroNodes bool `json:"zero_nodes,omitempty"`
 	// Plan is a fleet-bound record's selection plan.
 	Plan *SelectionPlan `json:"plan,omitempty"`
+	// LiveRevision is the record's live revision when render ran, whatever
+	// revision the request named. The core checks a plan's from_revision
+	// against it and a staged render is told apart from a live one by it.
+	LiveRevision string `json:"live_revision,omitempty"`
 }
 
 // ConvertRequest is the whole input of convert, which produces one client's
@@ -326,17 +332,80 @@ func ValidateResponseChain(steps []ResponseTransformerStep) error {
 // EncodeConvertRequest validates a convert request and encodes it, refusing
 // an encoding over MaxConvertRequestBytes.
 func EncodeConvertRequest(r ConvertRequest) ([]byte, error) {
-	if err := r.Validate(); err != nil {
-		return nil, err
-	}
-	raw, err := json.Marshal(r)
+	raw, spliced, err := encodeConvertRequestSpliced(r)
 	if err != nil {
 		return nil, err
+	}
+	if !spliced {
+		if err := r.Validate(); err != nil {
+			return nil, err
+		}
+		if raw, err = json.Marshal(r); err != nil {
+			return nil, err
+		}
 	}
 	if len(raw) > MaxConvertRequestBytes {
 		return nil, fmt.Errorf("convert request encodes to %d bytes, over %d", len(raw), MaxConvertRequestBytes)
 	}
 	return raw, nil
+}
+
+// convertNodesSlot stands in for a convert request's nodes while the rest of
+// it is marshalled.
+var convertNodesSlot = json.RawMessage(`"\u0000nodes"`)
+
+// encodeConvertRequestSpliced is EncodeConvertRequest's validation and
+// encoding for a request whose every node is already canonical (compact,
+// none of the bytes encoding/json escapes), which is what core's binder
+// writes: one pass per node proves it a well-formed object, and the nodes
+// are spliced into json.Marshal's encoding of the rest instead of compacted
+// again, so the bytes are json.Marshal's. spliced is false when any node is
+// not canonical or the slot is not found exactly once, and the caller
+// validates and marshals as before.
+func encodeConvertRequestSpliced(r ConvertRequest) (raw []byte, spliced bool, err error) {
+	if len(r.Nodes) == 0 {
+		return nil, false, nil
+	}
+	size := 0
+	for _, node := range r.Nodes {
+		if len(node) == 0 || node[0] != '{' || !strictjson.CanonicalRaw(node) {
+			return nil, false, nil
+		}
+		size += len(node) + 1
+	}
+	// Validate's node check is what the canonical check just did: every node
+	// opens an object and is well formed. The rest is validated on a copy
+	// holding one empty node; a request over the node bound takes the plain
+	// path, which refuses it in Validate's order.
+	if len(r.Nodes) > MaxSubscriptionRecordNodes {
+		return nil, false, nil
+	}
+	checked := r
+	checked.Nodes = []json.RawMessage{json.RawMessage(`{}`)}
+	if err := checked.Validate(); err != nil {
+		return nil, false, err
+	}
+	rest := r
+	rest.Nodes = []json.RawMessage{convertNodesSlot}
+	head, err := json.Marshal(rest)
+	if err != nil {
+		return nil, false, err
+	}
+	slot := []byte(`"nodes":[` + string(convertNodesSlot) + `]`)
+	at := bytes.Index(head, slot)
+	if at < 0 || bytes.Count(head, slot) != 1 {
+		return nil, false, nil
+	}
+	out := make([]byte, 0, len(head)+size)
+	out = append(out, head[:at+len(`"nodes":[`)]...)
+	for i, node := range r.Nodes {
+		if i > 0 {
+			out = append(out, ',')
+		}
+		out = append(out, node...)
+	}
+	out = append(out, ']')
+	return append(out, head[at+len(slot):]...), true, nil
 }
 
 // DecodeConvertRequest decodes a convert request as strictly as the plugin
@@ -346,22 +415,90 @@ func DecodeConvertRequest(raw []byte) (ConvertRequest, error) {
 	if len(raw) == 0 || len(raw) > MaxConvertRequestBytes {
 		return ConvertRequest{}, errors.New("invalid convert request size")
 	}
-	if err := rejectDuplicateJSONFields(raw); err != nil {
-		return ConvertRequest{}, err
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	var req ConvertRequest
-	if err := decoder.Decode(&req); err != nil {
-		return ConvertRequest{}, err
-	}
-	if err := requireJSONEOF(decoder); err != nil {
-		return ConvertRequest{}, err
+	req, fast := decodeConvertRequestFast(raw)
+	if !fast {
+		if err := rejectDuplicateJSONFields(raw); err != nil {
+			return ConvertRequest{}, err
+		}
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		req = ConvertRequest{}
+		if err := decoder.Decode(&req); err != nil {
+			return ConvertRequest{}, err
+		}
+		if err := requireJSONEOF(decoder); err != nil {
+			return ConvertRequest{}, err
+		}
 	}
 	if err := req.Validate(); err != nil {
 		return ConvertRequest{}, err
 	}
 	return req, nil
+}
+
+// decodeConvertRequestFast is DecodeConvertRequest's decode for the plain
+// case: a request strictjson reads in one pass (no duplicate key at any
+// depth) whose members are named exactly as ConvertRequest's. Each member
+// decodes on its own, a struct member with unknown fields still refused as
+// the whole decode refuses them, and each bound node is copied from its own
+// bytes rather than scanned again; a convert request is several MiB of
+// nodes. ok is false for anything else, and the caller runs the strict
+// decode, which decides and words every error.
+func decodeConvertRequestFast(raw []byte) (ConvertRequest, bool) {
+	fields, ok := strictjson.Fields(raw)
+	if !ok {
+		return ConvertRequest{}, false
+	}
+	var req ConvertRequest
+	for _, f := range fields {
+		var err error
+		switch f.Key {
+		case "uris":
+			err = json.Unmarshal(f.Value, &req.URIs)
+		case "raw":
+			err = json.Unmarshal(f.Value, &req.Raw)
+		case "target":
+			err = json.Unmarshal(f.Value, &req.Target)
+		case "format":
+			err = json.Unmarshal(f.Value, &req.Format)
+		case "options":
+			err = json.Unmarshal(f.Value, &req.Options)
+		case "nodes":
+			if string(f.Value) == "null" {
+				req.Nodes = nil
+				continue
+			}
+			elements, ok := strictjson.Elements(f.Value)
+			if !ok {
+				return ConvertRequest{}, false
+			}
+			req.Nodes = make([]json.RawMessage, len(elements))
+			for i, element := range elements {
+				req.Nodes[i] = append(json.RawMessage(nil), element...)
+			}
+		case "document":
+			err = decodeStrictMember(f.Value, &req.Document)
+		case "response_chain":
+			err = decodeStrictMember(f.Value, &req.ResponseChain)
+		default:
+			return ConvertRequest{}, false
+		}
+		if err != nil {
+			return ConvertRequest{}, false
+		}
+	}
+	return req, true
+}
+
+// decodeStrictMember decodes one member as the strict whole-request decode
+// would reach it: unknown fields refused in any struct inside it.
+func decodeStrictMember(raw []byte, v any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(v); err != nil {
+		return err
+	}
+	return requireJSONEOF(decoder)
 }
 
 // Validate checks a convert reply: content present and every log level known.

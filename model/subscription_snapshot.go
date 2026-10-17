@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/LatticeNet/lattice-sdk/strictjson"
 )
 
 // SubscriptionSnapshotSchemaVersion is the current record shape.
@@ -64,34 +66,24 @@ func (s *SubscriptionSnapshot) UnmarshalJSON(raw []byte) error {
 	if len(raw) > MaxSubscriptionSnapshotBytes {
 		return fmt.Errorf("subscription snapshot encodes to %d bytes, over the %d-byte bound that a render request can carry", len(raw), MaxSubscriptionSnapshotBytes)
 	}
-	if err := rejectDuplicateJSONFields(raw); err != nil {
-		return err
-	}
-	type wire struct {
-		SchemaVersion  int             `json:"schema_version"`
-		PluginID       string          `json:"plugin_id"`
-		SubscriptionID string          `json:"subscription_id"`
-		Raw            string          `json:"raw"`
-		SourceVersion  string          `json:"source_version"`
-		SourceManifest json.RawMessage `json:"source_manifest"`
-		Userinfo       string          `json:"userinfo"`
-		FetchedAt      time.Time       `json:"fetched_at"`
-		FetchError     string          `json:"fetch_error"`
-		LastAttemptAt  time.Time       `json:"last_attempt_at"`
-		Stale          bool            `json:"stale"`
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	var decoded wire
-	if err := decoder.Decode(&decoded); err != nil {
-		return err
-	}
-	if err := requireJSONEOF(decoder); err != nil {
-		return err
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return err
+	decoded, fields, fast := decodeSnapshotWireFast(raw)
+	if !fast {
+		if err := rejectDuplicateJSONFields(raw); err != nil {
+			return err
+		}
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		decoded = wire{}
+		if err := decoder.Decode(&decoded); err != nil {
+			return err
+		}
+		if err := requireJSONEOF(decoder); err != nil {
+			return err
+		}
+		fields = nil
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return err
+		}
 	}
 	if len(decoded.Raw) > MaxSubscriptionRawBytes && !strings.HasPrefix(decoded.Raw, "lat$") {
 		return fmt.Errorf("subscription snapshot raw content exceeds byte limit")
@@ -139,6 +131,77 @@ func (s *SubscriptionSnapshot) UnmarshalJSON(raw []byte) error {
 	s.persistedSchemaVersion = persistedVersion
 	s.needsRewrite = persistedVersion != SubscriptionSnapshotSchemaVersion
 	return nil
+}
+
+// wire is a snapshot as it is encoded. It keeps the name of the local type
+// the strict decode used before the one-pass read, because encoding/json
+// names the type in its errors (model.wire.raw) and callers saw those words.
+type wire struct {
+	SchemaVersion  int             `json:"schema_version"`
+	PluginID       string          `json:"plugin_id"`
+	SubscriptionID string          `json:"subscription_id"`
+	Raw            string          `json:"raw"`
+	SourceVersion  string          `json:"source_version"`
+	SourceManifest json.RawMessage `json:"source_manifest"`
+	Userinfo       string          `json:"userinfo"`
+	FetchedAt      time.Time       `json:"fetched_at"`
+	FetchError     string          `json:"fetch_error"`
+	LastAttemptAt  time.Time       `json:"last_attempt_at"`
+	Stale          bool            `json:"stale"`
+}
+
+// decodeSnapshotWireFast is UnmarshalJSON's strict decode for the plain
+// case: a snapshot strictjson reads in one pass whose members are named
+// exactly as wire's, decoded member by member, with the member map
+// the checks below read built from the same pass. A snapshot carries a raw
+// of up to several MiB, which the strict decode and the member map each
+// scanned again. ok is false for anything else, and the caller runs the
+// strict decode, which decides and words every error.
+func decodeSnapshotWireFast(raw []byte) (wire, map[string]json.RawMessage, bool) {
+	members, ok := strictjson.Fields(raw)
+	if !ok {
+		return wire{}, nil, false
+	}
+	var w wire
+	fields := make(map[string]json.RawMessage, len(members))
+	for _, f := range members {
+		var target any
+		switch f.Key {
+		case "schema_version":
+			target = &w.SchemaVersion
+		case "plugin_id":
+			target = &w.PluginID
+		case "subscription_id":
+			target = &w.SubscriptionID
+		case "raw":
+			target = &w.Raw
+		case "source_version":
+			target = &w.SourceVersion
+		case "source_manifest":
+			w.SourceManifest = append(json.RawMessage(nil), f.Value...)
+		case "userinfo":
+			target = &w.Userinfo
+		case "fetched_at":
+			target = &w.FetchedAt
+		case "fetch_error":
+			target = &w.FetchError
+		case "last_attempt_at":
+			target = &w.LastAttemptAt
+		case "stale":
+			target = &w.Stale
+		default:
+			return wire{}, nil, false
+		}
+		if str, isString := target.(*string); isString {
+			if !strictjson.StringInto(f.Value, str) {
+				return wire{}, nil, false
+			}
+		} else if target != nil && json.Unmarshal(f.Value, target) != nil {
+			return wire{}, nil, false
+		}
+		fields[f.Key] = f.Value
+	}
+	return w, fields, true
 }
 
 func (s SubscriptionSnapshot) PersistedSchemaVersion() int { return s.persistedSchemaVersion }

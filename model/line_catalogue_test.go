@@ -353,6 +353,19 @@ func TestLineCatalogueRowEncodedSizeBound(t *testing.T) {
 	if err := over.Validate(); err == nil {
 		t.Fatal("row one byte over the bound accepted")
 	}
+	// ValidateTrustingEncoding reads the bound from the encoding the caller made,
+	// with Validate's verdict and wording.
+	if err := at.ValidateTrustingEncoding([]byte(mustJSON(t, at))); err != nil {
+		t.Fatalf("ValidateTrustingEncoding refuses the row at the bound: %v", err)
+	}
+	if err, want := over.ValidateTrustingEncoding([]byte(mustJSON(t, over))), over.Validate(); err == nil || err.Error() != want.Error() {
+		t.Fatalf("ValidateTrustingEncoding over the bound answers %v, Validate %v", err, want)
+	}
+	broken := fullCatalogueRow(t)
+	broken.LineUUID = "not-a-uuid"
+	if err, want := broken.ValidateTrustingEncoding([]byte(mustJSON(t, broken))), broken.Validate(); err == nil || err.Error() != want.Error() {
+		t.Fatalf("ValidateTrustingEncoding on a broken field answers %v, Validate %v", err, want)
+	}
 }
 
 func TestLineCatalogueSelectorFieldNames(t *testing.T) {
@@ -548,4 +561,204 @@ func TestLineCatalogueResponsePageByteBound(t *testing.T) {
 	if err := build(rows).Validate(); err == nil {
 		t.Fatal("page one byte over the byte bound accepted")
 	}
+
+	// A page read from its bytes is held to the same bounds, measured on
+	// those bytes: the same verdict and words on every page above.
+	for name, page := range map[string]LineCatalogueResponse{"dense": dense, "exact": exact, "over": build(rows)} {
+		received, err := ReadLineCataloguePage([]byte(mustJSON(t, page)))
+		if err != nil || !received.Sized() {
+			t.Fatalf("%s: read %v, row sizes %v", name, err, received.Sized())
+		}
+		if got, want := received.Validate(), page.Validate(); errText(got) != errText(want) {
+			t.Fatalf("%s: received page answers %v, Validate %v", name, got, want)
+		}
+	}
+}
+
+// An empty raw is no encoding: ValidateTrustingEncoding then encodes the row
+// and bounds it as Validate does, and only ValidateFields leaves the size out.
+func TestValidateTrustingEncodingBoundsARowWithoutAnEncoding(t *testing.T) {
+	over := padRowTo(t, fullCatalogueRow(t), MaxLineCatalogueRowBytes+1)
+	for _, raw := range [][]byte{nil, {}} {
+		if got, want := over.ValidateTrustingEncoding(raw), over.Validate(); got == nil || got.Error() != want.Error() {
+			t.Fatalf("raw %q: ValidateTrustingEncoding answers %v, Validate %v", raw, got, want)
+		}
+	}
+	if err := over.ValidateFields(); err != nil {
+		t.Fatalf("ValidateFields refuses a row only its size puts over the bound: %v", err)
+	}
+	broken := fullCatalogueRow(t)
+	broken.Protocol = ""
+	if got, want := broken.ValidateFields(), broken.Validate(); got == nil || got.Error() != want.Error() {
+		t.Fatalf("ValidateFields answers %v, Validate %v", got, want)
+	}
+}
+
+// A row whose bytes leave out every member encoding/json always writes and a
+// valid row may omit grows by exactly those members when encoded again, and
+// that growth must stay inside maxReceivedRowGrowth, which the received
+// bounds rest on.
+func TestReceivedRowGrowsAtMostTheBound(t *testing.T) {
+	head := `{"line_uuid":"` + catalogueLineA + `","line_hash_id":"h","node_id":"n","protocol":"vless"`
+	for _, raw := range []string{
+		head + `,"chain":{"role":"exit","exit_geo":{}},"geo":{},"probe":{"verdict":"pass"},"usage":{"identity_id":"u"}}`,
+		head + `,"chain":{"role":"exit","exit_geo":{}},"geo":{},"usage":{"identity_id":"u"}}`,
+		head + `,"chain":{"role":"single"}}`,
+	} {
+		var row LineCatalogueRow
+		if err := json.Unmarshal([]byte(raw), &row); err != nil {
+			t.Fatal(err)
+		}
+		if err := row.Validate(); err != nil {
+			t.Fatalf("%s: %v", raw, err)
+		}
+		if !rowReencodesWithinGrowth([]byte(raw)) {
+			t.Fatalf("%s is screened out", raw)
+		}
+		if grown := len(mustJSON(t, row)) - len(raw); grown > maxReceivedRowGrowth {
+			t.Fatalf("%s grows by %d bytes once encoded, over the %d the received bounds allow", raw, grown, maxReceivedRowGrowth)
+		}
+	}
+}
+
+// A page read from its bytes is held to the bounds Validate computes on its
+// encoding, not only to its length as it arrived: bytes encoding/json
+// escapes, invalid UTF-8 and exponent numbers encode longer than they arrive.
+func TestReceivedPageIsBoundedByItsEncoding(t *testing.T) {
+	encodeRaw := func(row LineCatalogueRow, unescape bool) string {
+		raw := mustJSON(t, row)
+		if unescape {
+			for _, r := range []string{"<", ">", "&", "\u2028", "\u2029"} {
+				esc, _ := json.Marshal(r)
+				raw = strings.ReplaceAll(raw, strings.Trim(string(esc), `"`), r)
+			}
+		}
+		return raw
+	}
+	page := func(rows ...string) []byte {
+		return []byte(`{"catalogue_version":"cv1:9f2c","rows":[` + strings.Join(rows, ",") + `]}`)
+	}
+	lt := fullCatalogueRow(t)
+	lt.Label, lt.Name, lt.NodeName = strings.Repeat("<", 4000), strings.Repeat("&", 4000), strings.Repeat(">", 4000)
+	sep := fullCatalogueRow(t)
+	sep.Label, sep.Name, sep.NodeName = strings.Repeat("\u2028", 4000), strings.Repeat("\u2029", 4000), strings.Repeat("\u2028", 4000)
+	invalid := fullCatalogueRow(t)
+	invalid.Label, invalid.Name, invalid.NodeName = strings.Repeat("a", 4000), strings.Repeat("b", 4000), strings.Repeat("c", 4000)
+	invalidRaw := mustJSON(t, invalid)
+	for _, from := range []string{strings.Repeat("a", 4000), strings.Repeat("b", 4000), strings.Repeat("c", 4000)} {
+		invalidRaw = strings.Replace(invalidRaw, from, strings.Repeat("\xff", 4000), 1)
+	}
+	exponent := fullCatalogueRow(t)
+	exponent.Geo = &NodeGeo{Country: "JP", Lat: 1e20, Lon: -1e20}
+	exponentRaw := strings.Replace(strings.Replace(mustJSON(t, exponent), "100000000000000000000", "1e20", 1), "-100000000000000000000", "-1E20", 1)
+	small := fullCatalogueRow(t)
+	small.LineUUID = catalogueLineB
+	cases := map[string][]byte{
+		"html bytes":          page(encodeRaw(lt, true)),
+		"line separators":     page(encodeRaw(sep, true)),
+		"invalid utf-8":       page(invalidRaw),
+		"exponent numbers":    page(exponentRaw),
+		"a canonical row too": page(encodeRaw(small, false), encodeRaw(lt, true)),
+	}
+	// Rows each under the row bound once encoded, on a page far under the page
+	// bound as it arrived and over it once encoded.
+	var many []string
+	for i := 0; i < 220; i++ {
+		row := fullCatalogueRow(t)
+		row.LineUUID = fmt.Sprintf("%08x-0000-4000-8000-000000000000", i)
+		row.Label = strings.Repeat("<", 3500)
+		many = append(many, encodeRaw(row, true))
+	}
+	cases["page over once encoded"] = page(many...)
+	for name, raw := range cases {
+		received, err := ReadLineCataloguePage(raw)
+		if err != nil || !received.Sized() {
+			t.Fatalf("%s: read %v, sized %v", name, err, received.Sized())
+		}
+		var decoded LineCatalogueResponse
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		got, want := received.Validate(), decoded.Validate()
+		if errText(got) != errText(want) {
+			t.Fatalf("%s: received page answers %v, Validate of the decoded page %v", name, got, want)
+		}
+		if name != "exponent numbers" && name != "a canonical row too" && got == nil {
+			t.Fatalf("%s: a page over its bound once encoded is admitted (%d bytes received)", name, len(raw))
+		}
+	}
+	if received, _ := ReadLineCataloguePage(page(exponentRaw)); received.rowCanonical[0] < 0 {
+		t.Fatal("a row with an exponent number is bounded by its received length")
+	}
+	if received, _ := ReadLineCataloguePage(page(encodeRaw(small, false))); received.rowCanonical[0] != -1 {
+		t.Fatal("a canonical row was encoded again")
+	}
+}
+
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
+// ReadLineCataloguePage decodes what json.Unmarshal decodes, row sizes or
+// not, and its Validate agrees with Validate on a page the core encoded.
+func TestReadLineCataloguePageDecodesAsJSONUnmarshal(t *testing.T) {
+	row := fullCatalogueRow(t)
+	other := row
+	other.LineUUID = catalogueLineB
+	canonical := mustJSON(t, LineCatalogueResponse{CatalogueVersion: "cv1:9f2c", Cursor: "next", Rows: []LineCatalogueRow{row, other}})
+	pages := []string{canonical, `{"catalogue_version":"cv1:9f2c","rows":[]}`, `{"catalogue_version":"cv1:9f2c","rows":null}`,
+		`{"catalogue_version":"cv1:9f2c"}`, `{"Catalogue_Version":"cv1:9f2c","rows":[]}`, `{"catalogue_version":"cv1:9f2c","rows":[],"extra":1}`,
+		`{"catalogue_version":"cv1:9f2c","rows":[{"line_uuid":"x","line_uuid":"y"}]}`, `{"catalogue_version":7}`, `[]`, `{"rows":[1]}`,
+		strings.Replace(canonical, `"rows":[`, `"rows": [ `, 1)}
+	for _, raw := range pages {
+		sameReceivedPage(t, []byte(raw))
+	}
+	received, err := ReadLineCataloguePage([]byte(canonical))
+	if err != nil || len(received.rowBytes) != 2 || received.rowBytes[0] != len(mustJSON(t, row)) || received.rowCanonical[0] != -1 {
+		t.Fatalf("canonical page: %v, row sizes %v, measured %v", err, received.rowBytes, received.rowCanonical)
+	}
+	if got, want := received.Validate(), received.LineCatalogueResponse.Validate(); errText(got) != errText(want) {
+		t.Fatalf("canonical page: received %v, Validate %v", got, want)
+	}
+	dup := mustJSON(t, LineCatalogueResponse{CatalogueVersion: "cv1:9f2c", Rows: []LineCatalogueRow{row, row}})
+	if received, _ := ReadLineCataloguePage([]byte(dup)); received.Validate() == nil {
+		t.Fatal("a received page that lists a line twice is accepted")
+	}
+	broken := row
+	broken.Protocol = ""
+	if received, _ := ReadLineCataloguePage([]byte(mustJSON(t, LineCatalogueResponse{CatalogueVersion: "cv1:9f2c", Rows: []LineCatalogueRow{broken}}))); received.Validate() == nil {
+		t.Fatal("a received page with a broken row is accepted")
+	}
+}
+
+func sameReceivedPage(t *testing.T, raw []byte) {
+	t.Helper()
+	got, gotErr := ReadLineCataloguePage(raw)
+	var want LineCatalogueResponse
+	wantErr := json.Unmarshal(raw, &want)
+	if errText(gotErr) != errText(wantErr) {
+		t.Fatalf("page %q: read error %v, json.Unmarshal %v", raw, gotErr, wantErr)
+	}
+	if gotErr == nil && !reflect.DeepEqual(got.LineCatalogueResponse, want) {
+		t.Fatalf("page %q: read %+v, json.Unmarshal %+v", raw, got.LineCatalogueResponse, want)
+	}
+	// The received bounds may refuse more than Validate (bytes that arrived
+	// longer than they encode), never less.
+	if gotErr == nil && got.Validate() == nil {
+		if err := want.Validate(); err != nil {
+			t.Fatalf("page %q: the received page is admitted, and Validate refuses it: %v", raw, err)
+		}
+	}
+}
+
+func FuzzReadLineCataloguePageDecodesAsJSONUnmarshal(f *testing.F) {
+	f.Add([]byte(`{"catalogue_version":"cv1:9f2c","rows":[{"line_uuid":"3f2b8c1e-7d4a-4e5f-9a6b-1c2d3e4f5a6b","geo":{"country":"JP"}}],"cursor":"c"}`))
+	f.Add([]byte(`{"catalogue_version":"v","rows":null,"selector_fields":["countries"]}`))
+	f.Add([]byte(`{"catalogue_version":"v","rows":[{"line_uuid":"3f2b8c1e-7d4a-4e5f-9a6b-1c2d3e4f5a6b","line_hash_id":"h","node_id":"n","protocol":"p","chain":{"role":"single"},"label":"<&>","geo":{"lat":1e20}}]}`))
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		sameReceivedPage(t, raw)
+	})
 }

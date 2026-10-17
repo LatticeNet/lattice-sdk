@@ -64,7 +64,7 @@ type Token struct {
 	ActorID         string    `json:"actor_id"`
 	Scopes          []string  `json:"scopes"`
 	ServerAllowlist []string  `json:"server_allowlist"`
-	RevokedAt       time.Time `json:"revoked_at,omitempty"`
+	RevokedAt       time.Time `json:"revoked_at,omitzero"`
 	CreatedAt       time.Time `json:"created_at"`
 }
 
@@ -110,12 +110,14 @@ type Node struct {
 	// TokenLastUsedAt is coarse lifecycle telemetry for the node credential. It
 	// is updated only after successful bearer-token authentication and may be
 	// write-throttled by the server to avoid heartbeat write amplification.
-	TokenLastUsedAt time.Time        `json:"token_last_used_at,omitempty"`
-	LastSeen        time.Time        `json:"last_seen"`
-	Metrics         Metrics          `json:"metrics"`
-	HostFacts       HostFacts        `json:"host_facts"`
-	Geo             *NodeGeo         `json:"geo,omitempty"`
-	AgentDebug      AgentDebugPolicy `json:"agent_debug"`
+	TokenLastUsedAt time.Time `json:"token_last_used_at,omitzero"`
+	// LastSeen is the node's last heartbeat. A node that has never reported
+	// has none, and the field is absent rather than year 0001.
+	LastSeen   time.Time        `json:"last_seen,omitzero"`
+	Metrics    Metrics          `json:"metrics"`
+	HostFacts  HostFacts        `json:"host_facts"`
+	Geo        *NodeGeo         `json:"geo,omitempty"`
+	AgentDebug AgentDebugPolicy `json:"agent_debug"`
 	// Trace is this node's sing-box trace collection policy. It sits beside
 	// AgentDebug rather than in its own map because it is node behaviour, not a
 	// separate resource: it is audited but never goes through the approval
@@ -168,7 +170,7 @@ type Node struct {
 type AgentDebugPolicy struct {
 	Enabled   bool      `json:"enabled"`
 	Collect   bool      `json:"collect"`
-	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitzero"`
 }
 
 // AgentDebugConfig is the runtime policy an agent polls from the server. It is
@@ -200,7 +202,7 @@ type AgentLaunchConfig struct {
 	// SingBoxStatsAPI is the loopback host:port of the sing-box experimental
 	// stats API (ADR-004); empty disables the singbox-stats collector.
 	SingBoxStatsAPI string    `json:"singbox_stats_api,omitempty"`
-	UpdatedAt       time.Time `json:"updated_at,omitempty"`
+	UpdatedAt       time.Time `json:"updated_at,omitzero"`
 }
 
 type AgentConfig struct {
@@ -249,7 +251,7 @@ type NodeIPConfig struct {
 	Resolvers    []string  `json:"resolvers,omitempty"` // IP-echo URLs; empty = agent defaults
 	Script       string    `json:"script,omitempty"`    // server->agent only; redact from node views
 	ScriptSHA256 string    `json:"script_sha256,omitempty"`
-	UpdatedAt    time.Time `json:"updated_at,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at,omitzero"`
 }
 
 // AgentDebugBatch carries locally emitted agent diagnostics to the server log
@@ -382,10 +384,11 @@ type Metrics struct {
 	// first cycle after agent start (no prior sample) and any counter reset both
 	// report 0. Dashboards read these for live bandwidth; the cumulative
 	// NetRxBytes/NetTxBytes remain the source of truth.
-	NetRxSpeed    float64   `json:"net_rx_speed"`
-	NetTxSpeed    float64   `json:"net_tx_speed"`
-	UptimeSeconds uint64    `json:"uptime_seconds"`
-	CollectedAt   time.Time `json:"collected_at"`
+	NetRxSpeed    float64 `json:"net_rx_speed"`
+	NetTxSpeed    float64 `json:"net_tx_speed"`
+	UptimeSeconds uint64  `json:"uptime_seconds"`
+	// CollectedAt is absent on the zero Metrics a never-reported node carries.
+	CollectedAt time.Time `json:"collected_at,omitzero"`
 }
 
 // Work loop steps an agent names in AgentHealth.Step and AgentHealth.Steps.
@@ -471,8 +474,8 @@ type HostFacts struct {
 	MemoryTotal     uint64    `json:"memory_total,omitempty"`
 	SwapTotal       uint64    `json:"swap_total,omitempty"`
 	Virtualization  string    `json:"virtualization,omitempty"`
-	BootTime        time.Time `json:"boot_time,omitempty"`
-	ReportedAt      time.Time `json:"reported_at,omitempty"`
+	BootTime        time.Time `json:"boot_time,omitzero"`
+	ReportedAt      time.Time `json:"reported_at,omitzero"`
 }
 
 const (
@@ -501,10 +504,10 @@ type MachineProfile struct {
 	PriceCents int64  `json:"price_cents,omitempty"`
 	Currency   string `json:"currency,omitempty"`
 
-	PurchasedAt  time.Time `json:"purchased_at,omitempty"`
+	PurchasedAt  time.Time `json:"purchased_at,omitzero"`
 	RenewalCycle string    `json:"renewal_cycle,omitempty"`
 	CycleDays    int       `json:"cycle_days,omitempty"`
-	NextRenewal  time.Time `json:"next_renewal,omitempty"`
+	NextRenewal  time.Time `json:"next_renewal,omitzero"`
 	AutoRoll     bool      `json:"auto_roll"`
 
 	RemindDaysBefore []int  `json:"remind_days_before,omitempty"`
@@ -616,7 +619,7 @@ type DNSDeployment struct {
 	Listeners []DNSListener `json:"listeners,omitempty"`
 	// CertNotAfter is the operator-entered expiry of the external engine's
 	// TLS certificate (DoT/DoH). Zero when unknown or not applicable.
-	CertNotAfter time.Time `json:"cert_not_after,omitempty"`
+	CertNotAfter time.Time `json:"cert_not_after,omitzero"`
 
 	ListenPort int    `json:"listen_port"`
 	EnableUDP  bool   `json:"enable_udp"`
@@ -636,9 +639,9 @@ type DNSDeployment struct {
 	EngineVersion    string    `json:"engine_version,omitempty"`
 	LastIPv4         string    `json:"last_ipv4,omitempty"`
 	LastIPv6         string    `json:"last_ipv6,omitempty"`
-	LastAppliedAt    time.Time `json:"last_applied_at,omitempty"`
+	LastAppliedAt    time.Time `json:"last_applied_at,omitzero"`
 	LastError        string    `json:"last_error,omitempty"`
-	LastPublishedAt  time.Time `json:"last_published_at,omitempty"`
+	LastPublishedAt  time.Time `json:"last_published_at,omitzero"`
 	LastPublishError string    `json:"last_publish_error,omitempty"`
 	Disabled         bool      `json:"disabled,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
@@ -665,8 +668,8 @@ type GeoRouting struct {
 
 	LastRenderedSHA string    `json:"last_rendered_sha,omitempty"`
 	Status          string    `json:"status,omitempty"`
-	LastAppliedAt   time.Time `json:"last_applied_at,omitempty"`
-	LastDelegatedAt time.Time `json:"last_delegated_at,omitempty"`
+	LastAppliedAt   time.Time `json:"last_applied_at,omitzero"`
+	LastDelegatedAt time.Time `json:"last_delegated_at,omitzero"`
 	LastError       string    `json:"last_error,omitempty"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
@@ -738,7 +741,7 @@ type NetPolicy struct {
 	// manual policy, so the two authoring lanes never silently clobber.
 	GroupDerived  bool      `json:"group_derived,omitempty"`
 	LastPlanSHA   string    `json:"last_plan_sha,omitempty"`
-	LastAppliedAt time.Time `json:"last_applied_at,omitempty"`
+	LastAppliedAt time.Time `json:"last_applied_at,omitzero"`
 	LastError     string    `json:"last_error,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
@@ -903,7 +906,7 @@ type NodeGuardBinding struct {
 	Managed         bool        `json:"managed"`
 	Version         int64       `json:"version"`
 	LastPlanSHA     string      `json:"last_plan_sha,omitempty"`
-	LastAppliedAt   time.Time   `json:"last_applied_at,omitempty"`
+	LastAppliedAt   time.Time   `json:"last_applied_at,omitzero"`
 	LastError       string      `json:"last_error,omitempty"`
 	AppliedTableSHA string      `json:"applied_table_sha,omitempty"`
 	CreatedAt       time.Time   `json:"created_at"`
@@ -1032,7 +1035,7 @@ type WGExternalPeer struct {
 	Address      string    `json:"address"`
 	PublicKey    string    `json:"public_key"`
 	AllowedIPs   []string  `json:"allowed_ips,omitempty"`
-	LastIssuedAt time.Time `json:"last_issued_at,omitempty"`
+	LastIssuedAt time.Time `json:"last_issued_at,omitzero"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
@@ -1115,10 +1118,10 @@ type ProxyUser struct {
 
 	InboundIDs        []string  `json:"inbound_ids,omitempty"`
 	TrafficLimitBytes int64     `json:"traffic_limit_bytes,omitempty"`
-	ExpiresAt         time.Time `json:"expires_at,omitempty"`
+	ExpiresAt         time.Time `json:"expires_at,omitzero"`
 
 	UsedBytes  int64     `json:"used_bytes"`
-	LastSeenAt time.Time `json:"last_seen_at,omitempty"`
+	LastSeenAt time.Time `json:"last_seen_at,omitzero"`
 	Status     string    `json:"status"`
 
 	// Server-managed notification cursors. They prevent repeated quota/expiry
@@ -1165,7 +1168,7 @@ type ProxyNodeProfile struct {
 	ClashAPISecret string `json:"clash_api_secret,omitempty"`
 
 	AppliedSHA256 string    `json:"applied_sha256,omitempty"`
-	LastApplyAt   time.Time `json:"last_apply_at,omitempty"`
+	LastApplyAt   time.Time `json:"last_apply_at,omitzero"`
 	LastError     string    `json:"last_error,omitempty"`
 
 	// Usage collector health is agent-reported and server persisted for
@@ -1173,10 +1176,10 @@ type ProxyNodeProfile struct {
 	// the server's monotonic usage accounting.
 	UsageCollectorSource      string    `json:"usage_collector_source,omitempty"`
 	UsageCollectorStatus      string    `json:"usage_collector_status,omitempty"`
-	UsageCollectorCheckedAt   time.Time `json:"usage_collector_checked_at,omitempty"`
-	UsageCollectorLastOKAt    time.Time `json:"usage_collector_last_ok_at,omitempty"`
+	UsageCollectorCheckedAt   time.Time `json:"usage_collector_checked_at,omitzero"`
+	UsageCollectorLastOKAt    time.Time `json:"usage_collector_last_ok_at,omitzero"`
 	UsageCollectorLastError   string    `json:"usage_collector_last_error,omitempty"`
-	UsageCollectorLastErrorAt time.Time `json:"usage_collector_last_error_at,omitempty"`
+	UsageCollectorLastErrorAt time.Time `json:"usage_collector_last_error_at,omitzero"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -1216,7 +1219,7 @@ type ProxyUsageSnapshot struct {
 	CollectorSource    string    `json:"collector_source,omitempty"` // file | http | future core transport
 	CollectorStatus    string    `json:"collector_status,omitempty"` // ok | error
 	CollectorError     string    `json:"collector_error,omitempty"`
-	CollectorCheckedAt time.Time `json:"collector_checked_at,omitempty"`
+	CollectorCheckedAt time.Time `json:"collector_checked_at,omitzero"`
 }
 
 // ProxyTrafficCounter is one cumulative traffic counter pair as the core
@@ -1287,7 +1290,7 @@ type SingBoxRuntime struct {
 	Running bool `json:"running"`
 	PID     int  `json:"pid,omitempty"`
 	// StartedAt is best-effort (proc entry age); zero when unknown.
-	StartedAt time.Time `json:"started_at,omitempty"`
+	StartedAt time.Time `json:"started_at,omitzero"`
 	// ExeSHA256 is the hex sha256 of the executable the trusted process runs,
 	// read through /proc/<pid>/exe so it hashes the inode the kernel loaded
 	// rather than whatever the path holds now. It lets the control plane
@@ -1300,7 +1303,7 @@ type SingBoxRuntime struct {
 	// probes exposes a crash loop even when every probe lands while the
 	// process happens to be alive.
 	RestartCount int       `json:"restart_count,omitempty"`
-	ProbedAt     time.Time `json:"probed_at,omitempty"`
+	ProbedAt     time.Time `json:"probed_at,omitzero"`
 	ProbeError   string    `json:"probe_error,omitempty"`
 }
 
@@ -1345,7 +1348,7 @@ type NodeGeo struct {
 	ASOrg     string    `json:"as_org,omitempty"`
 	Provider  string    `json:"provider,omitempty"`
 	Source    string    `json:"source,omitempty"`
-	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitzero"`
 }
 
 // NodeInventory carries the operator's own assessment of a node's provenance
@@ -1383,13 +1386,14 @@ type Task struct {
 	RerunOfTaskID string               `json:"rerun_of_task_id,omitempty"`
 	RerunOfNodeID string               `json:"rerun_of_node_id,omitempty"`
 	CreatedAt     time.Time            `json:"created_at"`
-	StartedAt     time.Time            `json:"started_at,omitempty"`
-	FinishedAt    time.Time            `json:"finished_at,omitempty"`
+	// StartedAt and FinishedAt are absent until the task starts and finishes.
+	StartedAt  time.Time `json:"started_at,omitzero"`
+	FinishedAt time.Time `json:"finished_at,omitzero"`
 }
 
 type TaskLease struct {
 	LeaseID   string    `json:"lease_id"`
-	StartedAt time.Time `json:"started_at,omitempty"`
+	StartedAt time.Time `json:"started_at,omitzero"`
 }
 
 type TaskResult struct {
@@ -1417,9 +1421,9 @@ type TerminalSession struct {
 	BytesIn   int64     `json:"bytes_in,omitempty"`
 	BytesOut  int64     `json:"bytes_out,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
-	OpenedAt  time.Time `json:"opened_at,omitempty"`
-	ClosedAt  time.Time `json:"closed_at,omitempty"`
-	LastSeen  time.Time `json:"last_seen,omitempty"`
+	OpenedAt  time.Time `json:"opened_at,omitzero"`
+	ClosedAt  time.Time `json:"closed_at,omitzero"`
+	LastSeen  time.Time `json:"last_seen,omitzero"`
 }
 
 type TerminalEvent struct {
@@ -1540,8 +1544,8 @@ type StorageAccessToken struct {
 	Kind       string    `json:"kind"`
 	Access     string    `json:"access"`
 	Buckets    []string  `json:"buckets,omitempty"`
-	RevokedAt  time.Time `json:"revoked_at,omitempty"`
-	LastUsedAt time.Time `json:"last_used_at,omitempty"`
+	RevokedAt  time.Time `json:"revoked_at,omitzero"`
+	LastUsedAt time.Time `json:"last_used_at,omitzero"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
@@ -1569,10 +1573,10 @@ type PluginInstallation struct {
 	ArtifactSHA256 string    `json:"artifact_sha256,omitempty"`
 	BundlePath     string    `json:"bundle_path,omitempty"`
 	Status         string    `json:"status"`
-	VerifiedAt     time.Time `json:"verified_at,omitempty"`
-	InstalledAt    time.Time `json:"installed_at,omitempty"`
-	ActivatedAt    time.Time `json:"activated_at,omitempty"`
-	DisabledAt     time.Time `json:"disabled_at,omitempty"`
+	VerifiedAt     time.Time `json:"verified_at,omitzero"`
+	InstalledAt    time.Time `json:"installed_at,omitzero"`
+	ActivatedAt    time.Time `json:"activated_at,omitzero"`
+	DisabledAt     time.Time `json:"disabled_at,omitzero"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
@@ -1688,7 +1692,7 @@ type DDNSProfile struct {
 	// Status (updated by the server after each run).
 	LastIPv4  string    `json:"last_ipv4,omitempty"`
 	LastIPv6  string    `json:"last_ipv6,omitempty"`
-	LastRunAt time.Time `json:"last_run_at,omitempty"`
+	LastRunAt time.Time `json:"last_run_at,omitzero"`
 	LastError string    `json:"last_error,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

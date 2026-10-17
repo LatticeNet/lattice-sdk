@@ -223,6 +223,10 @@ type AgentConfig struct {
 	// source and its responder (design 29 D12). Absent when the node has
 	// none of them; agents that do not know the field ignore it.
 	Beacon *AgentBeaconConfig `json:"beacon,omitempty"`
+	// AgentUpdate names the agent update binary to prefetch and the kept
+	// downloads to keep (design 31, S4; see agent_prefetch.go). A server
+	// that serves prefetch always sends it; nil means an older server.
+	AgentUpdate *AgentUpdateConfig `json:"agent_update,omitempty"`
 }
 
 const (

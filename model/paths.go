@@ -1,6 +1,10 @@
 package model
 
-import "time"
+import (
+	"fmt"
+	"math"
+	"time"
+)
 
 // Monitoring paths (lattice docs design 29).
 //
@@ -29,6 +33,11 @@ const (
 const (
 	PathStateUp   = "up"
 	PathStateDown = "down"
+	// PathStateDegraded: the path answers, but its loss or its median
+	// latency is well above its own last week (design 29 D13). The control
+	// plane judges it on a schedule; PathCell.Reason names the arms that
+	// held and PathCell.Degraded carries the evidence.
+	PathStateDegraded = "degraded"
 	// PathStateUnknown: no current result when one was expected. It is
 	// never drawn as up; PathCell.Reason says why when the control plane
 	// knows.
@@ -124,6 +133,15 @@ type PathSeries struct {
 	// one line can cross a method switch.
 	MethodChanges []PathMethodChange `json:"method_changes"`
 	Buckets       []PathBucket       `json:"buckets"`
+	// Baseline is the degraded rule's guide for the pair the path is
+	// judged on now (design 29 D13). It is always on the wire from a
+	// server that judges degraded, null for a tls check or a generated
+	// path with no current check, so a console tells the two servers
+	// apart by the key.
+	Baseline *PathBaseline `json:"baseline"`
+	// Previous is the same path one window earlier, present only when the
+	// request asked for it (compare=previous).
+	Previous *PathPreviousSeries `json:"previous,omitempty"`
 }
 
 // PathMethodChange marks where a path's method begins.
@@ -164,9 +182,14 @@ type PathBucket struct {
 // read (both its source and its target node), with its state now and its
 // figures over the window. ObservedAt is when the states were judged; the
 // window figures are cached until the window's next bucket closes.
+//
+// DegradedAt is when the degraded evaluator last ran, null before its first
+// run after a start. A server that judges degraded always sends the key, so
+// a console shows the degraded state only when it is present.
 type PathMatrix struct {
 	Window     string       `json:"window"`
 	ObservedAt time.Time    `json:"observed_at"`
+	DegradedAt *time.Time   `json:"degraded_at"`
 	Sources    []PathSource `json:"sources"`
 	Targets    []PathTarget `json:"targets"`
 	Paths      []PathCell   `json:"paths"`
@@ -193,31 +216,283 @@ type PathTarget struct {
 // or the node an operator check's address resolves to, else empty; Target
 // is what the method dials. MonitorID is empty for a generated path whose
 // check does not exist (a target that was never probeable). Managed marks
-// generated checks. Reason is set only when State is unknown. Samples and
-// Expected count runs over the window, as PathBucket's N and Expected do.
-// Prev is the same figures one window earlier, null when that window heard
-// nothing; LastAt is the newest run's stamp, null when there is none.
+// generated checks. Reason is set only when State is unknown or degraded
+// (a PathReasonDegraded* code). Samples and Expected count runs over the
+// window, as PathBucket's N and Expected do. Prev is the same figures one
+// window earlier, null when that window heard nothing; LastAt is the newest
+// run's stamp, null when there is none. Degraded is present only while
+// State is degraded.
 type PathCell struct {
-	Source     string     `json:"source"`
-	TargetNode string     `json:"target_node"`
-	Target     string     `json:"target"`
-	MonitorID  string     `json:"monitor_id"`
-	Managed    bool       `json:"managed"`
-	Method     string     `json:"method"`
-	State      string     `json:"state"`
-	Reason     string     `json:"reason"`
-	P50Ms      *float64   `json:"p50_ms"`
-	P95Ms      *float64   `json:"p95_ms"`
-	JitterMs   *float64   `json:"jitter_ms"`
-	Loss       *float64   `json:"loss"`
-	Samples    int        `json:"samples"`
-	Expected   int        `json:"expected"`
-	Prev       *PathPrev  `json:"prev"`
-	LastAt     *time.Time `json:"last_at"`
+	Source     string           `json:"source"`
+	TargetNode string           `json:"target_node"`
+	Target     string           `json:"target"`
+	MonitorID  string           `json:"monitor_id"`
+	Managed    bool             `json:"managed"`
+	Method     string           `json:"method"`
+	State      string           `json:"state"`
+	Reason     string           `json:"reason"`
+	P50Ms      *float64         `json:"p50_ms"`
+	P95Ms      *float64         `json:"p95_ms"`
+	JitterMs   *float64         `json:"jitter_ms"`
+	Loss       *float64         `json:"loss"`
+	Samples    int              `json:"samples"`
+	Expected   int              `json:"expected"`
+	Prev       *PathPrev        `json:"prev"`
+	LastAt     *time.Time       `json:"last_at"`
+	Degraded   *PathDegradation `json:"degraded,omitempty"`
 }
 
 // PathPrev is a path's figures over the window before the one asked for.
 type PathPrev struct {
 	P50Ms *float64 `json:"p50_ms"`
 	Loss  *float64 `json:"loss"`
+}
+
+// The degraded rule (design 29 D13).
+//
+// The control plane judges every path whose check kind is tcp, http, icmp or
+// beacon once a minute, never on a console read. A path is judged only once
+// its baseline, the one-hour buckets whose start lies in [H - 7 days, H)
+// where H is the current hour, holds PathBaselineMinHours buckets with a
+// countable run. The condition is either arm:
+//
+//   - loss: at least PathDegradedMinProbes probes in the last hour, and their
+//     loss strictly above DegradedLossTrigger of the baseline loss;
+//   - latency: at least PathDegradedMinLatencyRuns successful runs in the last
+//     15 minutes, and their median strictly above DegradedLatencyTrigger of
+//     the baseline median.
+//
+// A path enters degraded on PathDegradedEnterAfter consecutive evaluations
+// that find the condition and leaves once it has been absent for
+// PathDegradedLeaveAfter. A probe is counted as MonitorRollup counts it:
+// every echo or request of a multi-packet run, one per run otherwise.
+const (
+	PathDegradedEvery          = time.Minute
+	PathBaselineSpan           = 7 * 24 * time.Hour
+	PathBaselineMinHours       = 24
+	PathDegradedLossWindow     = time.Hour
+	PathDegradedMinProbes      = 30
+	PathDegradedLatencyWindow  = 15 * time.Minute
+	PathDegradedMinLatencyRuns = 5
+	PathDegradedEnterAfter     = 2
+	PathDegradedLeaveAfter     = 10 * time.Minute
+)
+
+// Why a path reads degraded (PathCell.Reason): the arms that held at the last
+// evaluation that found the condition. They carry a prefix so one reason
+// table serves the unknown and the degraded states.
+const (
+	PathReasonDegradedLoss        = "degraded_loss"
+	PathReasonDegradedLatency     = "degraded_latency"
+	PathReasonDegradedLossLatency = "degraded_loss_latency"
+)
+
+// The degraded rule's thresholds: defaults and bounds of each
+// MonitorDegradedRule field.
+const (
+	MonitorDegradedLossPercentDefault     = 2.0
+	MonitorDegradedLossPercentMin         = 0.5
+	MonitorDegradedLossPercentMax         = 50.0
+	MonitorDegradedLossFactorDefault      = 2.0
+	MonitorDegradedLossFactorMin          = 1.2
+	MonitorDegradedLossFactorMax          = 10.0
+	MonitorDegradedLatencyFactorDefault   = 2.0
+	MonitorDegradedLatencyFactorMin       = 1.2
+	MonitorDegradedLatencyFactorMax       = 10.0
+	MonitorDegradedLatencyMarginMsDefault = 30.0
+	MonitorDegradedLatencyMarginMsMin     = 5.0
+	MonitorDegradedLatencyMarginMsMax     = 1000.0
+)
+
+// MonitorDegradedRule is a check's degraded thresholds (Monitor.Degraded, and
+// LatencyProbeConfig.Degraded for the path set's generated checks). A zero
+// field reads as its default, and so does a nil rule. The control plane
+// stores the canonical form (CanonicalDegradedRule).
+type MonitorDegradedRule struct {
+	// LossPercent is the loss floor in percent: the loss arm needs more
+	// than this whatever the baseline.
+	LossPercent float64 `json:"loss_percent,omitempty"`
+	// LossFactor is how many times the baseline loss the loss arm needs.
+	LossFactor float64 `json:"loss_factor,omitempty"`
+	// LatencyFactor is how many times the baseline median the latency arm
+	// needs.
+	LatencyFactor float64 `json:"latency_factor,omitempty"`
+	// LatencyMarginMs is how many milliseconds above the baseline median
+	// the latency arm needs.
+	LatencyMarginMs float64 `json:"latency_margin_ms,omitempty"`
+}
+
+// degradedRuleField is one threshold: its JSON name, default, bounds and the
+// number of decimal places the canonical form keeps.
+type degradedRuleField struct {
+	name        string
+	def, lo, hi float64
+	decimals    int
+	get         func(*MonitorDegradedRule) *float64
+	unit        string
+}
+
+var degradedRuleFields = []degradedRuleField{
+	{"loss_percent", MonitorDegradedLossPercentDefault, MonitorDegradedLossPercentMin, MonitorDegradedLossPercentMax, 1,
+		func(r *MonitorDegradedRule) *float64 { return &r.LossPercent }, " percent"},
+	{"loss_factor", MonitorDegradedLossFactorDefault, MonitorDegradedLossFactorMin, MonitorDegradedLossFactorMax, 1,
+		func(r *MonitorDegradedRule) *float64 { return &r.LossFactor }, ""},
+	{"latency_factor", MonitorDegradedLatencyFactorDefault, MonitorDegradedLatencyFactorMin, MonitorDegradedLatencyFactorMax, 1,
+		func(r *MonitorDegradedRule) *float64 { return &r.LatencyFactor }, ""},
+	{"latency_margin_ms", MonitorDegradedLatencyMarginMsDefault, MonitorDegradedLatencyMarginMsMin, MonitorDegradedLatencyMarginMsMax, 0,
+		func(r *MonitorDegradedRule) *float64 { return &r.LatencyMarginMs }, " ms"},
+}
+
+// ValidateDegradedRule refuses a rule with a field that is NaN, infinite,
+// negative or, when set, outside its bounds, naming the field. Zero is not
+// a value but the default, and a nil rule is all defaults.
+func ValidateDegradedRule(r *MonitorDegradedRule) error {
+	if r == nil {
+		return nil
+	}
+	for _, f := range degradedRuleFields {
+		v := *f.get(r)
+		switch {
+		case math.IsNaN(v) || math.IsInf(v, 0):
+			return fmt.Errorf("degraded.%s must be a number", f.name)
+		case v < 0:
+			return fmt.Errorf("degraded.%s cannot be negative", f.name)
+		case v != 0 && (v < f.lo || v > f.hi):
+			return fmt.Errorf("degraded.%s must be %s to %s%s", f.name, formatDegradedBound(f.lo), formatDegradedBound(f.hi), f.unit)
+		}
+	}
+	return nil
+}
+
+func formatDegradedBound(v float64) string {
+	return fmt.Sprintf("%g", v)
+}
+
+// CanonicalDegradedRule is the form the control plane stores: every value
+// rounded to one decimal place (the margin to a whole millisecond), a field
+// equal to its default written as zero, and nil when every field is the
+// default, so an editor that echoes the defaults stores nothing. Validate
+// first; a rounded value never leaves its bounds, which sit on the same
+// places.
+func CanonicalDegradedRule(r *MonitorDegradedRule) *MonitorDegradedRule {
+	if r == nil {
+		return nil
+	}
+	out := *r
+	empty := true
+	for _, f := range degradedRuleFields {
+		p := f.get(&out)
+		scale := math.Pow(10, float64(f.decimals))
+		v := math.Round(*p*scale) / scale
+		if v == f.def {
+			v = 0
+		}
+		*p = v
+		if v != 0 {
+			empty = false
+		}
+	}
+	if empty {
+		return nil
+	}
+	return &out
+}
+
+// Effective is the rule with every unset field at its default. A nil rule is
+// every default.
+func (r *MonitorDegradedRule) Effective() MonitorDegradedRule {
+	var out MonitorDegradedRule
+	if r != nil {
+		out = *r
+	}
+	for _, f := range degradedRuleFields {
+		if p := f.get(&out); *p == 0 {
+			*p = f.def
+		}
+	}
+	return out
+}
+
+// DegradedLossTrigger is the loss share (0 to 1) the loss arm must exceed:
+// the larger of the floor, LossPercent / 100, and LossFactor times the
+// baseline loss. Unset fields read as their defaults.
+func DegradedLossTrigger(rule MonitorDegradedRule, baseLoss float64) float64 {
+	e := rule.Effective()
+	return math.Max(e.LossPercent/100, e.LossFactor*baseLoss)
+}
+
+// DegradedLatencyTrigger is the median in milliseconds the latency arm must
+// exceed: the larger of LatencyFactor times the baseline median and the
+// baseline median plus LatencyMarginMs. Unset fields read as their defaults.
+func DegradedLatencyTrigger(rule MonitorDegradedRule, baseP50 float64) float64 {
+	e := rule.Effective()
+	return math.Max(e.LatencyFactor*baseP50, baseP50+e.LatencyMarginMs)
+}
+
+// PathDegradation is why a path reads degraded (PathCell.Degraded). Since is
+// the first of the evaluations that entered it, EvaluatedAt the last one that
+// found the condition, which the evidence is from. ClearingSince is set once
+// the condition is absent; the path leaves PathDegradedLeaveAfter later
+// unless it returns. Loss is present when the loss arm held, Latency when the
+// latency arm did.
+type PathDegradation struct {
+	Since         time.Time            `json:"since"`
+	EvaluatedAt   time.Time            `json:"evaluated_at"`
+	ClearingSince *time.Time           `json:"clearing_since,omitempty"`
+	Loss          *PathLossEvidence    `json:"loss,omitempty"`
+	Latency       *PathLatencyEvidence `json:"latency,omitempty"`
+}
+
+// PathLossEvidence is the loss arm at an evaluation: the loss over the last
+// hour (Value), the baseline loss and the trigger it exceeded, as shares from
+// 0 to 1, with the probes sent and lost in that hour.
+type PathLossEvidence struct {
+	Value    float64 `json:"value"`
+	Baseline float64 `json:"baseline"`
+	Trigger  float64 `json:"trigger"`
+	Sent     int     `json:"sent"`
+	Lost     int     `json:"lost"`
+}
+
+// PathLatencyEvidence is the latency arm at an evaluation: the median of the
+// last 15 minutes over Runs successful runs, the baseline median and the
+// trigger it exceeded.
+type PathLatencyEvidence struct {
+	P50Ms      float64 `json:"p50_ms"`
+	Runs       int     `json:"runs"`
+	BaselineMs float64 `json:"baseline_ms"`
+	TriggerMs  float64 `json:"trigger_ms"`
+}
+
+// PathBaseline is the degraded rule's guide for one pair (PathSeries.Baseline):
+// the baseline window [From, To), the one-hour buckets in it with a run
+// (Hours), whether that is enough to judge (Ready, at least
+// PathBaselineMinHours), the baseline median and loss (null without data),
+// the triggers (null until Ready, and the latency trigger also while P50Ms is
+// null) and the thresholds in force with every default filled in.
+type PathBaseline struct {
+	From         time.Time           `json:"from"`
+	To           time.Time           `json:"to"`
+	Hours        int                 `json:"hours"`
+	Ready        bool                `json:"ready"`
+	P50Ms        *float64            `json:"p50_ms"`
+	Loss         *float64            `json:"loss"`
+	TriggerP50Ms *float64            `json:"trigger_p50_ms"`
+	TriggerLoss  *float64            `json:"trigger_loss"`
+	Rule         MonitorDegradedRule `json:"rule"`
+}
+
+// PathPreviousSeries is a path's median one window earlier, aligned with the
+// series it was asked with: P50Ms has one entry per PathSeries.Buckets entry,
+// entry i covering [t_i - OffsetSeconds, t_i - OffsetSeconds + step), null
+// where that step had no successful run. StepSeconds is the resolution it was
+// read at; when that is coarser than the series' step (the earlier window
+// lies beyond the finer tier's retention), one bucket gives its value to
+// every step it covers.
+type PathPreviousSeries struct {
+	From          time.Time  `json:"from"`
+	To            time.Time  `json:"to"`
+	OffsetSeconds int        `json:"offset_seconds"`
+	StepSeconds   int        `json:"step_seconds"`
+	P50Ms         []*float64 `json:"p50_ms"`
 }

@@ -263,21 +263,103 @@ type AgentDebugBatch struct {
 // approval when the node reports a different AgentVersion and no equivalent
 // pending/approved update is already open.
 type AgentUpdatePolicy struct {
-	NodeID             string    `json:"node_id"`
-	Enabled            bool      `json:"enabled"`
-	AutoPlan           bool      `json:"auto_plan"`
-	TargetVersion      string    `json:"target_version"`
-	BinaryURL          string    `json:"binary_url"`
-	SHA256             string    `json:"sha256"`
-	InstallPath        string    `json:"install_path"`
-	ServiceName        string    `json:"service_name"`
-	LastPlannedVersion string    `json:"last_planned_version,omitempty"`
-	LastPlannedAt      time.Time `json:"last_planned_at,omitempty"`
+	NodeID             string `json:"node_id"`
+	Enabled            bool   `json:"enabled"`
+	AutoPlan           bool   `json:"auto_plan"`
+	TargetVersion      string `json:"target_version"`
+	BinaryURL          string `json:"binary_url"`
+	SHA256             string `json:"sha256"`
+	InstallPath        string `json:"install_path"`
+	ServiceName        string `json:"service_name"`
+	LastPlannedVersion string `json:"last_planned_version,omitempty"`
+	// LastPlannedAt and LastAppliedAt are absent until a plan or a confirmed
+	// update sets them (omitzero: omitempty never omits a time.Time, and the
+	// console reads any value it is sent as a real time).
+	LastPlannedAt      time.Time `json:"last_planned_at,omitzero"`
 	LastAppliedVersion string    `json:"last_applied_version,omitempty"`
-	LastAppliedAt      time.Time `json:"last_applied_at,omitempty"`
+	LastAppliedAt      time.Time `json:"last_applied_at,omitzero"`
 	LastError          string    `json:"last_error,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
+	// LastFetch is what the node's last reported update download did, nil
+	// until a task result carries a fetch summary. The control plane writes
+	// it; a client that sends it has it ignored.
+	LastFetch *AgentUpdateFetch `json:"last_fetch,omitempty"`
+	CreatedAt time.Time         `json:"created_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
+}
+
+// Kinds of download source an AgentUpdateFetchAttempt names. A consumer must
+// accept a kind it does not know.
+const (
+	// AgentFetchKindControlPlane is the binary from the control plane.
+	AgentFetchKindControlPlane = "cp"
+	// AgentFetchKindControlPlaneGzip is the gzip-compressed binary from the
+	// control plane, decompressed on the node.
+	AgentFetchKindControlPlaneGzip = "cp.gz"
+	// AgentFetchKindUpstream is the uncompressed release asset, either the
+	// plan's only source or the control plane's fallback.
+	AgentFetchKindUpstream = "up"
+)
+
+// Stages an update script can end in, as AgentUpdateFetch.Stage names them.
+// A consumer must accept a stage it does not know.
+const (
+	AgentFetchStagePrepare = "prepare"
+	AgentFetchStageFetch   = "fetch"
+	AgentFetchStageVerify  = "verify"
+	AgentFetchStageUnpack  = "unpack"
+	AgentFetchStageInstall = "install"
+	AgentFetchStageDone    = "done"
+)
+
+// AgentUpdateFetch is the parsed "lattice-agent-fetch v1" line an agent
+// update script prints on every exit path (design 31): each fetch it made,
+// and the status and stage it exited with. The control plane keeps the last
+// one per node, for a success and a failure alike, so a slow download that
+// finished is as visible as one that failed.
+//
+// A task result without the line (an approval planned before the source
+// walk, or a script killed before it could print) leaves the previous record
+// in place; At says when that one was recorded. The line comes from the
+// node, so every value is low-trust telemetry for display, never input to a
+// decision.
+type AgentUpdateFetch struct {
+	// ApprovalID is the approval whose task printed the line.
+	ApprovalID string `json:"approval_id"`
+	// TargetVersion is the version that approval installs.
+	TargetVersion string `json:"target_version,omitempty"`
+	// At is when the control plane received the task result.
+	At time.Time `json:"at,omitzero"`
+	// Fetches lists the fetches in the order the script made them. It is
+	// empty when no fetch ran: the script stopped before downloading, or a
+	// file kept from an earlier attempt already held the pinned bytes.
+	Fetches []AgentUpdateFetchAttempt `json:"fetches,omitempty"`
+	// ExitCode is the script's exit status; 0 with Stage "done" is an
+	// installed binary whose restart is scheduled.
+	ExitCode int `json:"exit_code"`
+	// Stage is where the script stopped: prepare, fetch, verify, unpack,
+	// install or done.
+	Stage string `json:"stage"`
+}
+
+// AgentUpdateFetchAttempt is one fetch from one source.
+type AgentUpdateFetchAttempt struct {
+	// Source is the source's place in the plan's first pass, from 1. A
+	// second-pass fetch has 0 here and SecondPass set; Kind names its source.
+	Source int `json:"source,omitempty"`
+	// SecondPass marks a fetch of the second pass, which gives what is left
+	// of the budget to the source that delivered the largest part of its
+	// file.
+	SecondPass bool `json:"second_pass,omitempty"`
+	// Kind is cp, cp.gz or up (the AgentFetchKind constants).
+	Kind string `json:"kind"`
+	// ExitCode is the fetcher's exit status: curl's, wget's, or 124 when
+	// timeout stopped wget.
+	ExitCode int `json:"exit_code"`
+	// Bytes is what this fetch added to its file.
+	Bytes int64 `json:"bytes"`
+	// Seconds is how long the fetch took, nil when the node's date gave no
+	// epoch seconds.
+	Seconds *int64 `json:"seconds,omitempty"`
 }
 
 type Metrics struct {

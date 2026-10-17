@@ -45,3 +45,32 @@ func TestBeaconWireShapes(t *testing.T) {
 		t.Fatalf("the beacon view names a key: %s", view)
 	}
 }
+
+// TestBeaconReplanShape pins the replan a console files in one click: off
+// the view until it is needed, and when present a plan request the plan
+// route takes as it is.
+func TestBeaconReplanShape(t *testing.T) {
+	if raw, _ := json.Marshal(BeaconView{NodeID: "n", State: BeaconStateListening}); strings.Contains(string(raw), "replan") {
+		t.Fatalf("a view that needs no plan carries the key: %s", raw)
+	}
+	replan := BeaconReplan{
+		NodeID: "node_t", Name: "target", Reason: PathReasonFirewallPending,
+		Added: []string{"node_d"}, Removed: []string{},
+		Request: BeaconPlanRequest{NodeID: "node_t", Action: BeaconActionChange},
+	}
+	raw, err := json.Marshal(BeaconView{NodeID: "node_t", Replan: &replan})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `"replan":{"node_id":"node_t","name":"target","reason":"firewall_pending","added":["node_d"],"removed":[],"request":{"node_id":"node_t","action":"change"}}`
+	if !strings.Contains(string(raw), want) {
+		t.Fatalf("view = %s, want it to carry %s", raw, want)
+	}
+	raw, err = json.Marshal(PathMatrix{Window: PathWindowHour, BeaconReplans: []BeaconReplan{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"beacon_replans":[]`) {
+		t.Fatalf("matrix = %s", raw)
+	}
+}

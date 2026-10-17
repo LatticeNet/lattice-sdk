@@ -13,6 +13,9 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
+
+	"github.com/LatticeNet/lattice-sdk/strictjson"
 )
 
 // The line catalogue (design 28) is the credential-free view of the fleet's
@@ -419,31 +422,79 @@ func (r LineCatalogueRow) validate() (int, error) {
 	if err := r.validateFields(); err != nil {
 		return 0, err
 	}
-	raw, err := json.Marshal(r)
+	size, err := encodedLength(r)
 	if err != nil {
 		return 0, fmt.Errorf("line catalogue row %s: %w", r.LineUUID, err)
 	}
-	if len(raw) > MaxLineCatalogueRowBytes {
-		return 0, fmt.Errorf("line catalogue row %s encodes to %d bytes, over %d", r.LineUUID, len(raw), MaxLineCatalogueRowBytes)
+	return size, r.checkSize(size)
+}
+
+// ValidateTrustingEncoding is Validate for a row the caller has just
+// encoded: the size bound is read from raw instead of from a second
+// encoding, on the caller's word that raw is json.Marshal(r). Passed other
+// bytes, it bounds those bytes all the same. An empty raw is no encoding,
+// and the row is encoded and bounded as Validate does. Core encodes every
+// row it serves, so it validates with this and encodes each row once.
+func (r LineCatalogueRow) ValidateTrustingEncoding(raw []byte) error {
+	if len(raw) == 0 {
+		return r.Validate()
 	}
-	return len(raw), nil
+	if err := r.validateFields(); err != nil {
+		return err
+	}
+	return r.checkSize(len(raw))
+}
+
+// ValidateFields is Validate without the size bound: every check of the
+// row's fields and nothing that needs its encoding. It is for a caller that
+// bounds the row's size another way, or that checks one value on a row far
+// under the bound.
+func (r LineCatalogueRow) ValidateFields() error {
+	return r.validateFields()
+}
+
+func (r LineCatalogueRow) checkSize(size int) error {
+	if size > MaxLineCatalogueRowBytes {
+		return fmt.Errorf("line catalogue row %s encodes to %d bytes, over %d", r.LineUUID, size, MaxLineCatalogueRowBytes)
+	}
+	return nil
+}
+
+// byteCounter counts what is written to it and keeps nothing.
+type byteCounter int
+
+func (c *byteCounter) Write(p []byte) (int, error) {
+	*c += byteCounter(len(p))
+	return len(p), nil
+}
+
+// encodedLength is len(json.Marshal(v)) without the copy Marshal returns: an
+// Encoder writes the same bytes (HTML escaping included) from its pooled
+// buffer, plus one newline.
+func encodedLength(v any) (int, error) {
+	var n byteCounter
+	if err := json.NewEncoder(&n).Encode(v); err != nil {
+		return 0, err
+	}
+	return int(n) - 1, nil
 }
 
 func (r LineCatalogueRow) validateFields() error {
-	if !subscriptionSourceUUIDv4.MatchString(r.LineUUID) {
+	if !isUUIDv4(r.LineUUID) {
 		return errors.New("line catalogue row: line_uuid must be a lowercase uuidv4")
 	}
-	for name, value := range map[string]string{"line_hash_id": r.LineHashID, "node_id": r.NodeID, "protocol": r.Protocol} {
-		if !validCatalogueID(value) {
-			return fmt.Errorf("line catalogue row %s: invalid %s", r.LineUUID, name)
+	type namedValue struct{ name, value string }
+	for _, f := range [...]namedValue{{"line_hash_id", r.LineHashID}, {"node_id", r.NodeID}, {"protocol", r.Protocol}} {
+		if !validCatalogueID(f.value) {
+			return fmt.Errorf("line catalogue row %s: invalid %s", r.LineUUID, f.name)
 		}
 	}
-	for name, value := range map[string]string{
-		"transport": r.Transport, "security": r.Security, "overlay_status": r.OverlayStatus,
-		"status": r.Status, "service_state": r.ServiceState,
+	for _, f := range [...]namedValue{
+		{"transport", r.Transport}, {"security", r.Security}, {"overlay_status", r.OverlayStatus},
+		{"status", r.Status}, {"service_state", r.ServiceState},
 	} {
-		if value != "" && !validCatalogueID(value) {
-			return fmt.Errorf("line catalogue row %s: invalid %s", r.LineUUID, name)
+		if f.value != "" && !validCatalogueID(f.value) {
+			return fmt.Errorf("line catalogue row %s: invalid %s", r.LineUUID, f.name)
 		}
 	}
 	for _, value := range []string{r.NodeName, r.Name, r.Label, r.PublicHost, r.ProviderEdge} {
@@ -467,7 +518,7 @@ func (r LineCatalogueRow) validateFields() error {
 		}
 	}
 	for _, ddns := range r.DDNSNames {
-		if net.ParseIP(ddns.Name) != nil || !validSubscriptionHost(ddns.Name) || numericAddressName(ddns.Name) {
+		if (ipLiteralBytes(ddns.Name) && net.ParseIP(ddns.Name) != nil) || !validSubscriptionHost(ddns.Name) || numericAddressName(ddns.Name) {
 			return fmt.Errorf("line catalogue row %s: invalid ddns name %q", r.LineUUID, ddns.Name)
 		}
 		if ddns.Target != "" && (len(ddns.Target) > MaxSubscriptionURIBytes || !validTemplateText(ddns.Target, 253) ||
@@ -556,6 +607,11 @@ func screenCatalogueValue(name string, value any) error {
 	return nil
 }
 
+// credentialSeparators drops the separators credentialName ignores. A
+// Replacer builds its lookup table on first use, so it is built once here
+// rather than once per screened key.
+var credentialSeparators = strings.NewReplacer("-", "", "_", "")
+
 // credentialName reports whether a field name is one a proxy protocol keeps
 // a credential under: the vless, vmess and tuic uuid (id in a vmess
 // document), the passwords of trojan, hysteria2, tuic, anytls, shadowsocks
@@ -564,7 +620,7 @@ func screenCatalogueValue(name string, value any) error {
 // a token. Case, hyphens and underscores are ignored, so private-key,
 // private_key and privateKey are one name.
 func credentialName(name string) bool {
-	folded := strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(name))
+	folded := strings.ToLower(credentialSeparators.Replace(name))
 	switch folded {
 	case "id", "uuid", "auth", "authstr", "psk", "username", "pass":
 		return true
@@ -580,7 +636,60 @@ func credentialName(name string) bool {
 // sensitiveCatalogueText reports whether a value looks like a sealed secret,
 // a private key or a URL, none of which a credential-free row carries.
 func sensitiveCatalogueText(value string) bool {
-	return strings.Contains(value, "://") || strings.Contains(strings.ToUpper(value), "PRIVATE KEY") || strings.HasPrefix(value, "lat$")
+	return strings.Contains(value, "://") || containsPrivateKey(value) || strings.HasPrefix(value, "lat$")
+}
+
+// privateKeyMarker is what sensitiveCatalogueText looks for in a value
+// upper-cased.
+const privateKeyMarker = "PRIVATE KEY"
+
+// containsPrivateKey reports strings.Contains(strings.ToUpper(value),
+// privateKeyMarker). On an ASCII value ToUpper maps only a to z, so the
+// search folds those in place instead of building the upper-cased copy (a
+// third of what screening a catalogue row cost). A value with any other byte
+// takes ToUpper itself, whose Unicode mapping can produce ASCII letters (the
+// dotless ı upper-cases to I).
+func containsPrivateKey(value string) bool {
+	for i := 0; i < len(value); i++ {
+		if value[i] >= utf8.RuneSelf {
+			return strings.Contains(strings.ToUpper(value), privateKeyMarker)
+		}
+	}
+	for i := 0; i+len(privateKeyMarker) <= len(value); i++ {
+		j := 0
+		for j < len(privateKeyMarker) && asciiUpper(value[i+j]) == privateKeyMarker[j] {
+			j++
+		}
+		if j == len(privateKeyMarker) {
+			return true
+		}
+	}
+	return false
+}
+
+// asciiUpper is strings.ToUpper on one ASCII byte.
+func asciiUpper(b byte) byte {
+	if b >= 'a' && b <= 'z' {
+		return b - ('a' - 'A')
+	}
+	return b
+}
+
+// containsControl reports strings.ContainsFunc(value, unicode.IsControl). An
+// ASCII byte is a control character exactly when it is below 0x20 or is DEL;
+// from the first byte that is not ASCII, which starts a rune since every byte
+// before it is one, the rest is judged by unicode.IsControl as before.
+func containsControl(value string) bool {
+	for i := 0; i < len(value); i++ {
+		b := value[i]
+		if b >= utf8.RuneSelf {
+			return strings.ContainsFunc(value[i:], unicode.IsControl)
+		}
+		if b < 0x20 || b == 0x7f {
+			return true
+		}
+	}
+	return false
 }
 
 // Validate checks a chain block.
@@ -595,7 +704,7 @@ func (c LineCatalogueChain) Validate() error {
 	default:
 		return fmt.Errorf("invalid chain path state %q", c.PathState)
 	}
-	if c.DownstreamLineUUID != "" && !subscriptionSourceUUIDv4.MatchString(c.DownstreamLineUUID) {
+	if c.DownstreamLineUUID != "" && !isUUIDv4(c.DownstreamLineUUID) {
 		return errors.New("chain downstream_line_uuid must be a lowercase uuidv4")
 	}
 	switch c.PathServiceState {
@@ -668,7 +777,7 @@ func (s LineCatalogueSelector) Validate() error {
 	}
 	seen := make(map[string]struct{}, len(s.LineUUIDs))
 	for _, id := range s.LineUUIDs {
-		if !subscriptionSourceUUIDv4.MatchString(id) {
+		if !isUUIDv4(id) {
 			return fmt.Errorf("selector line_uuid %q is not a lowercase uuidv4", id)
 		}
 		if _, dup := seen[id]; dup {
@@ -881,6 +990,32 @@ func DecodeLineCatalogueRequest(raw []byte) (LineCatalogueRequest, error) {
 // every row, that no line appears twice, and that the page encodes to at
 // most MaxLineCataloguePageBytes.
 func (r LineCatalogueResponse) Validate() error {
+	return r.validatePage(func(i int) (int, error) { return r.Rows[i].validate() }, func(rowBytes int) (int, error) {
+		head, err := r.envelopeBytes()
+		if err != nil {
+			return 0, err
+		}
+		return head + rowBytes + max(len(r.Rows)-1, 0), nil
+	})
+}
+
+// envelopeBytes is the length of the page's encoding without its rows. The
+// page encodes as its envelope with an empty rows array, plus each row's own
+// encoding and a comma between rows; encoding/json writes a slice element
+// exactly as it writes the value alone, so summing rows already measured
+// avoids encoding the whole page a second time.
+func (r LineCatalogueResponse) envelopeBytes() (int, error) {
+	envelope := r
+	if len(r.Rows) > 0 {
+		envelope.Rows = []LineCatalogueRow{}
+	}
+	head, err := json.Marshal(envelope)
+	return len(head), err
+}
+
+// validatePage is Validate with the way a row is validated and sized, and
+// the page sized, left to the caller.
+func (r LineCatalogueResponse) validatePage(row func(i int) (int, error), page func(rowBytes int) (int, error)) error {
 	if !validCatalogueToken(r.CatalogueVersion) {
 		return errors.New("catalogue page needs a catalogue_version")
 	}
@@ -902,34 +1037,230 @@ func (r LineCatalogueResponse) Validate() error {
 	}
 	seen := make(map[string]struct{}, len(r.Rows))
 	rowBytes := 0
-	for _, row := range r.Rows {
-		size, err := row.validate()
+	for i := range r.Rows {
+		size, err := row(i)
 		if err != nil {
 			return err
 		}
-		if _, dup := seen[row.LineUUID]; dup {
-			return fmt.Errorf("catalogue page lists line %s twice", row.LineUUID)
+		if _, dup := seen[r.Rows[i].LineUUID]; dup {
+			return fmt.Errorf("catalogue page lists line %s twice", r.Rows[i].LineUUID)
 		}
-		seen[row.LineUUID] = struct{}{}
+		seen[r.Rows[i].LineUUID] = struct{}{}
 		rowBytes += size
 	}
-	// The page encodes as its envelope with an empty rows array, plus each
-	// row's own encoding and a comma between rows; encoding/json writes a
-	// slice element exactly as it writes the value alone. Summing the rows
-	// already encoded avoids encoding the whole page a second time.
-	envelope := r
-	if len(r.Rows) > 0 {
-		envelope.Rows = []LineCatalogueRow{}
-	}
-	head, err := json.Marshal(envelope)
+	size, err := page(rowBytes)
 	if err != nil {
 		return err
 	}
-	size := len(head) + rowBytes + max(len(r.Rows)-1, 0)
 	if size > MaxLineCataloguePageBytes {
 		return fmt.Errorf("catalogue page encodes to %d bytes, over %d", size, MaxLineCataloguePageBytes)
 	}
 	return nil
+}
+
+// ReceivedLineCataloguePage is a catalogue page as a consumer read it from
+// the bytes the core sent, with the size of the page and of each row as they
+// arrived.
+type ReceivedLineCataloguePage struct {
+	LineCatalogueResponse
+	// pageBytes is the length of the page as received. rowBytes[i] is the
+	// length of row i's own bytes within it. rowCanonical[i] is the length of
+	// the row's encoding, or -1 when the row's bytes passed
+	// rowReencodesWithinGrowth and the encoding is known to be at most
+	// rowBytes[i]+maxReceivedRowGrowth. rowBytes is nil when the page was
+	// read without them, and Validate then measures as
+	// LineCatalogueResponse.Validate does. Only ReadLineCataloguePage sets
+	// them, so a page built by hand is always measured.
+	pageBytes    int
+	rowBytes     []int
+	rowCanonical []int
+}
+
+// Sized reports whether the page was read with its row sizes (the one-pass
+// read of ReadLineCataloguePage), so that Validate bounds it without
+// encoding every row again.
+func (p ReceivedLineCataloguePage) Sized() bool {
+	return p.rowBytes != nil
+}
+
+// maxReceivedRowGrowth bounds how much longer than it arrived a row encodes
+// once its bytes pass rowReencodesWithinGrowth. encoding/json then writes
+// nothing the bytes did not carry except the members it always writes and a
+// valid row may leave out: probe as null, or a probe's at and
+// consecutive_failures; a usage's used_bytes; the updated_at of geo and of
+// the chain's exit_geo. Together those are 138 bytes;
+// TestReceivedRowGrowsAtMostTheBound holds a row leaving out every one of
+// them to this bound.
+const maxReceivedRowGrowth = 256
+
+// rowReencodesWithinGrowth reports whether a row's bytes, decoded and
+// encoded again by encoding/json, can grow only by the members they leave
+// out (maxReceivedRowGrowth): they are valid UTF-8 (encoding/json replaces
+// an invalid byte with U+FFFD), carry no byte encoding/json escapes ('<',
+// '>', '&', U+2028, U+2029; each becomes six bytes), and write no number in
+// exponent form (a float written 1e20 encodes as 21 digits). Escapes and
+// whitespace in the bytes only shrink the encoding.
+func rowReencodesWithinGrowth(raw []byte) bool {
+	if !utf8.Valid(raw) {
+		return false
+	}
+	inString, escaped := false, false
+	for i, c := range raw {
+		switch {
+		case escaped:
+			escaped = false
+		case inString:
+			switch c {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			case '<', '>', '&':
+				return false
+			case 0xe2:
+				if i+2 < len(raw) && raw[i+1] == 0x80 && (raw[i+2] == 0xa8 || raw[i+2] == 0xa9) {
+					return false
+				}
+			}
+		case c == '"':
+			inString = true
+		case (c == 'e' || c == 'E') && i > 0 && raw[i-1] >= '0' && raw[i-1] <= '9':
+			return false
+		}
+	}
+	return true
+}
+
+// lineCataloguePageMembers are LineCatalogueResponse's JSON names.
+var lineCataloguePageMembers = map[string]bool{"catalogue_version": true, "rows": true, "cursor": true, "selector_fields": true, "unavailable": true}
+
+// ReadLineCataloguePage decodes a catalogue page exactly as json.Unmarshal
+// decodes it into a LineCatalogueResponse, and keeps the page's size and
+// every row's size as received, so Validate checks the bounds against the
+// bytes that arrived instead of encoding every row a second time. A page
+// read in one strictjson pass (an object strictjson admits whose members are
+// named exactly as LineCatalogueResponse's) decodes row by row from each
+// row's own bytes; any other page is decoded by json.Unmarshal whole and
+// carries no row sizes. It refuses what json.Unmarshal refuses.
+func ReadLineCataloguePage(raw []byte) (ReceivedLineCataloguePage, error) {
+	if page, ok := readLineCataloguePageFast(raw); ok {
+		return page, nil
+	}
+	var page ReceivedLineCataloguePage
+	if err := json.Unmarshal(raw, &page.LineCatalogueResponse); err != nil {
+		return ReceivedLineCataloguePage{}, err
+	}
+	page.pageBytes = len(raw)
+	return page, nil
+}
+
+func readLineCataloguePageFast(raw []byte) (ReceivedLineCataloguePage, bool) {
+	fields, ok := strictjson.Fields(raw)
+	if !ok {
+		return ReceivedLineCataloguePage{}, false
+	}
+	page := ReceivedLineCataloguePage{pageBytes: len(raw)}
+	for _, f := range fields {
+		if !lineCataloguePageMembers[f.Key] {
+			return ReceivedLineCataloguePage{}, false
+		}
+		var err error
+		switch f.Key {
+		case "catalogue_version":
+			err = json.Unmarshal(f.Value, &page.CatalogueVersion)
+		case "cursor":
+			err = json.Unmarshal(f.Value, &page.Cursor)
+		case "selector_fields":
+			err = json.Unmarshal(f.Value, &page.SelectorFields)
+		case "unavailable":
+			err = json.Unmarshal(f.Value, &page.Unavailable)
+		case "rows":
+			if string(f.Value) == "null" {
+				page.Rows, page.rowBytes, page.rowCanonical = nil, nil, nil
+				continue
+			}
+			elements, ok := strictjson.Elements(f.Value)
+			if !ok {
+				return ReceivedLineCataloguePage{}, false
+			}
+			page.Rows = make([]LineCatalogueRow, len(elements))
+			page.rowBytes = make([]int, len(elements))
+			page.rowCanonical = make([]int, len(elements))
+			failed := make([]bool, len(elements))
+			// Rows decode independently, so a full page decodes in
+			// parallel. A row whose bytes could encode longer than they
+			// arrived by more than the members they leave out, or one so
+			// close to the row bound that those members matter, is
+			// measured by encoding it; core's rows are neither.
+			eachIndex(len(elements), func(i int) {
+				failed[i] = json.Unmarshal(elements[i], &page.Rows[i]) != nil
+				page.rowBytes[i], page.rowCanonical[i] = len(elements[i]), -1
+				if !failed[i] && (len(elements[i])+maxReceivedRowGrowth > MaxLineCatalogueRowBytes || !rowReencodesWithinGrowth(elements[i])) {
+					n, err := encodedLength(page.Rows[i])
+					failed[i], page.rowCanonical[i] = err != nil, n
+				}
+			})
+			for _, f := range failed {
+				if f {
+					return ReceivedLineCataloguePage{}, false
+				}
+			}
+		}
+		if err != nil {
+			return ReceivedLineCataloguePage{}, false
+		}
+	}
+	return page, true
+}
+
+// Validate is LineCatalogueResponse.Validate with the row and page bounds
+// read from the sizes the page arrived with where those sizes prove them:
+// every row's fields are checked as Validate checks them, and each row and
+// the page are held to their bounds both as they arrived (what the reader
+// holds) and as encoding/json encodes them (what Validate bounds). A row
+// whose bytes cannot encode longer than they arrived by more than
+// maxReceivedRowGrowth is bounded by its received length; any other row was
+// measured when it was read. The page is bounded by its received length and
+// by its encoding, taken as the envelope plus each row's encoded length, or
+// its received length plus the growth bound; only a page whose growth bound
+// crosses the page bound has its remaining rows encoded. A page the core
+// encoded is its own re-encoding byte for byte, so the verdict and its words
+// are Validate's. Without row sizes it is Validate.
+func (p ReceivedLineCataloguePage) Validate() error {
+	if p.rowBytes == nil && len(p.Rows) > 0 || len(p.rowBytes) != len(p.Rows) || len(p.rowCanonical) != len(p.Rows) {
+		return p.LineCatalogueResponse.Validate()
+	}
+	exact := true
+	return p.validatePage(func(i int) (int, error) {
+		row := p.Rows[i]
+		if err := row.validateFields(); err != nil {
+			return 0, err
+		}
+		if n := p.rowCanonical[i]; n >= 0 {
+			return n, row.checkSize(max(n, p.rowBytes[i]))
+		}
+		exact = false
+		return p.rowBytes[i] + maxReceivedRowGrowth, row.checkSize(p.rowBytes[i])
+	}, func(rowBytes int) (int, error) {
+		head, err := p.envelopeBytes()
+		if err != nil {
+			return 0, err
+		}
+		size := head + rowBytes + max(len(p.Rows)-1, 0)
+		if size > MaxLineCataloguePageBytes && !exact {
+			size = head + max(len(p.Rows)-1, 0)
+			for i := range p.Rows {
+				n := p.rowCanonical[i]
+				if n < 0 {
+					if n, err = encodedLength(p.Rows[i]); err != nil {
+						return 0, err
+					}
+				}
+				size += n
+			}
+		}
+		return max(size, p.pageBytes), nil
+	})
 }
 
 func jsonFieldName(field reflect.StructField) string {
@@ -941,7 +1272,7 @@ func jsonFieldName(field reflect.StructField) string {
 // bounded, trimmed and printable.
 func validCatalogueID(value string) bool {
 	return value != "" && value == strings.TrimSpace(value) && len(value) <= MaxSubscriptionURIBytes &&
-		!strings.ContainsFunc(value, unicode.IsControl)
+		!containsControl(value)
 }
 
 func validCatalogueToken(value string) bool {
@@ -949,5 +1280,5 @@ func validCatalogueToken(value string) bool {
 }
 
 func validTemplateText(value string, maxBytes int) bool {
-	return len(value) <= maxBytes && !strings.ContainsFunc(value, unicode.IsControl)
+	return len(value) <= maxBytes && !containsControl(value)
 }

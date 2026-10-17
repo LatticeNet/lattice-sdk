@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/LatticeNet/lattice-sdk/strictjson"
 )
 
 // A fleet-bound record (design 28) renders to a SelectionPlan instead of a
@@ -191,7 +193,7 @@ func (s PlanSelection) Validate() error {
 	}
 	seen := make(map[string]struct{}, len(s.LineUUIDs))
 	for _, id := range s.LineUUIDs {
-		if !subscriptionSourceUUIDv4.MatchString(id) {
+		if !isUUIDv4(id) {
 			return fmt.Errorf("plan selection line_uuid %q is not a lowercase uuidv4", id)
 		}
 		if _, dup := seen[id]; dup {
@@ -236,7 +238,7 @@ type SelectionPlanNode struct {
 // NewPlanPlaceholder returns a fresh placeholder for one credential field of
 // one line, with a random part from crypto/rand.
 func NewPlanPlaceholder(lineUUID, field string) (string, error) {
-	if !subscriptionSourceUUIDv4.MatchString(lineUUID) {
+	if !isUUIDv4(lineUUID) {
 		return "", errors.New("placeholder line_uuid must be a lowercase uuidv4")
 	}
 	if !planPlaceholderField.MatchString(field) {
@@ -257,11 +259,43 @@ func ParsePlanPlaceholder(value string) (lineUUID, field string, err error) {
 	if !ok {
 		return "", "", errors.New("not a plan placeholder")
 	}
-	match := planPlaceholderBody.FindStringSubmatch(body)
-	if match == nil || len(match[0]) != len(body) {
+	line, field, ok := splitPlaceholderBody(body)
+	if !ok {
 		return "", "", errors.New("malformed plan placeholder")
 	}
-	return match[1], match[2], nil
+	return line, field, nil
+}
+
+// splitPlaceholderBody matches body against planPlaceholderBody in full,
+// without the regexp engine: a lowercase UUIDv4, a hyphen, a field of one to
+// 32 bytes ([a-z][a-z0-9_]*), a hyphen and 32 lowercase hex digits ending
+// body. Neither the field nor the hex holds a hyphen, so the field is
+// whatever lies between the UUID and the last 33 bytes.
+func splitPlaceholderBody(body string) (line, field string, ok bool) {
+	const uuid, random = 36, 2 * PlanPlaceholderRandomBytes
+	if len(body) < uuid+1+1+1+random || !isUUIDv4(body[:uuid]) || body[uuid] != '-' {
+		return "", "", false
+	}
+	rest := body[uuid+1:]
+	n := len(rest) - random - 1
+	if n < 1 || n > MaxPlanPlaceholderFieldBytes || rest[n] != '-' {
+		return "", "", false
+	}
+	field = rest[:n]
+	if field[0] < 'a' || field[0] > 'z' {
+		return "", "", false
+	}
+	for i := 1; i < n; i++ {
+		if c := field[i]; (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' {
+			return "", "", false
+		}
+	}
+	for i := n + 1; i < len(rest); i++ {
+		if c := rest[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return "", "", false
+		}
+	}
+	return body[:uuid], field, true
 }
 
 // CountPlanPlaceholders counts every well-formed placeholder in a document,
@@ -296,8 +330,33 @@ func (p SelectionPlan) Validate() error {
 	return p.validate(false)
 }
 
+// ValidateTrustingEncoding is Validate for a plan the caller has just
+// encoded, on the caller's word that raw is the plan's encoding (json.Marshal
+// of p, or bytes equal to it): one duplicate-key pass over raw stands in for
+// the pass over every node, and a node only has to open an object, because
+// raw holding it is valid. Passed bytes that are not the plan's encoding but
+// pass that one pass, it skips the per-node checks all the same; the name
+// says so at every call. A raw the pass does not admit, an empty one
+// included, is judged by Validate, which words the error.
+func (p SelectionPlan) ValidateTrustingEncoding(raw []byte) error {
+	if !strictjson.Valid(raw) {
+		return p.Validate()
+	}
+	return p.validate(true)
+}
+
+// ValidateTrustingWellFormedNodes is Validate on the caller's word that every
+// node is a well-formed JSON object with no duplicate key at any depth
+// (strictjson.Valid or strictjson.CanonicalRaw admitted it): each node then
+// only has to open an object, and no node is scanned again. The plugin proves
+// its nodes so as it encodes them, in parallel.
+func (p SelectionPlan) ValidateTrustingWellFormedNodes() error {
+	return p.validate(true)
+}
+
 // validate is Validate; keysChecked skips the duplicate-key scan of each node
-// when the caller already scanned the whole encoded plan.
+// when the caller already scanned the whole encoded plan, which also proved
+// every node well formed.
 func (p SelectionPlan) validate(keysChecked bool) error {
 	switch p.Kind {
 	case SelectionPlanKindNodes:
@@ -315,7 +374,7 @@ func (p SelectionPlan) validate(keysChecked bool) error {
 		return fmt.Errorf("plan has more than %d nodes", MaxSubscriptionRecordNodes)
 	}
 	for i, node := range p.Nodes {
-		if err := node.validate(); err != nil {
+		if err := node.validate(keysChecked); err != nil {
 			return fmt.Errorf("plan node %d: %w", i, err)
 		}
 		if !keysChecked {
@@ -340,8 +399,8 @@ func (p SelectionPlan) validate(keysChecked bool) error {
 	return ValidateResponseChain(p.ResponseChain)
 }
 
-func (n SelectionPlanNode) validate() error {
-	if !isJSONObject(n.Node) {
+func (n SelectionPlanNode) validate(wellFormed bool) error {
+	if wellFormed && !opensObject(n.Node) || !wellFormed && !isJSONObject(n.Node) {
 		return errors.New("node must be a JSON object")
 	}
 	if n.Provider {
@@ -356,7 +415,7 @@ func (n SelectionPlanNode) validate() error {
 		}
 		return nil
 	}
-	if !subscriptionSourceUUIDv4.MatchString(n.LineUUID) {
+	if !isUUIDv4(n.LineUUID) {
 		return errors.New("line_uuid must be a lowercase uuidv4")
 	}
 	for field, placeholder := range n.Placeholders {
@@ -420,17 +479,20 @@ func DecodeSelectionPlan(raw []byte) (SelectionPlan, error) {
 	if len(raw) == 0 || len(raw) > MaxSelectionPlanBytes {
 		return SelectionPlan{}, errors.New("invalid plan size")
 	}
-	if err := rejectDuplicateJSONFields(raw); err != nil {
-		return SelectionPlan{}, err
-	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	var plan SelectionPlan
-	if err := decoder.Decode(&plan); err != nil {
-		return SelectionPlan{}, err
-	}
-	if err := requireJSONEOF(decoder); err != nil {
-		return SelectionPlan{}, err
+	plan, fast := decodeSelectionPlanFast(raw)
+	if !fast {
+		if err := rejectDuplicateJSONFields(raw); err != nil {
+			return SelectionPlan{}, err
+		}
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		plan = SelectionPlan{}
+		if err := decoder.Decode(&plan); err != nil {
+			return SelectionPlan{}, err
+		}
+		if err := requireJSONEOF(decoder); err != nil {
+			return SelectionPlan{}, err
+		}
 	}
 	if err := plan.validate(true); err != nil {
 		return SelectionPlan{}, err
@@ -438,7 +500,100 @@ func DecodeSelectionPlan(raw []byte) (SelectionPlan, error) {
 	return plan, nil
 }
 
+// decodeSelectionPlanFast is DecodeSelectionPlan's decode for the plain
+// case: a plan strictjson reads in one pass whose members, and whose nodes'
+// members, are named exactly as SelectionPlan's and SelectionPlanNode's.
+// Each node's object is copied from its own bytes rather than scanned again
+// by a Decoder; a 1000-node plan is most of a megabyte, and core decodes it
+// on every bind. A struct member (the selection, the policy, the response
+// chain) still decodes with unknown fields refused. ok is false for anything
+// else, and the caller runs the strict decode, which decides and words every
+// error.
+func decodeSelectionPlanFast(raw []byte) (SelectionPlan, bool) {
+	fields, ok := strictjson.Fields(raw)
+	if !ok {
+		return SelectionPlan{}, false
+	}
+	var plan SelectionPlan
+	for _, f := range fields {
+		var err error
+		switch f.Key {
+		case "kind":
+			err = json.Unmarshal(f.Value, &plan.Kind)
+		case "document":
+			err = json.Unmarshal(f.Value, &plan.Document)
+		case "nodes":
+			if string(f.Value) == "null" {
+				plan.Nodes = nil
+				continue
+			}
+			elements, ok := strictjson.Elements(f.Value)
+			if !ok {
+				return SelectionPlan{}, false
+			}
+			plan.Nodes = make([]SelectionPlanNode, len(elements))
+			decoded := make([]bool, len(elements))
+			// Nodes decode independently, so a large plan's decode in
+			// parallel.
+			eachIndex(len(elements), func(i int) {
+				decoded[i] = decodePlanNodeFast(elements[i], &plan.Nodes[i])
+			})
+			for _, ok := range decoded {
+				if !ok {
+					return SelectionPlan{}, false
+				}
+			}
+		case "response_chain":
+			err = decodeStrictMember(f.Value, &plan.ResponseChain)
+		case "selection":
+			err = decodeStrictMember(f.Value, &plan.Selection)
+		case "policy":
+			err = decodeStrictMember(f.Value, &plan.Policy)
+		default:
+			return SelectionPlan{}, false
+		}
+		if err != nil {
+			return SelectionPlan{}, false
+		}
+	}
+	return plan, true
+}
+
+// decodePlanNodeFast decodes one plan node whose members are named exactly
+// as SelectionPlanNode's, copying its node object.
+func decodePlanNodeFast(raw []byte, node *SelectionPlanNode) bool {
+	fields, ok := strictjson.Fields(raw)
+	if !ok {
+		return false
+	}
+	for _, f := range fields {
+		var err error
+		switch f.Key {
+		case "line_uuid":
+			err = json.Unmarshal(f.Value, &node.LineUUID)
+		case "placeholders":
+			err = json.Unmarshal(f.Value, &node.Placeholders)
+		case "provider":
+			err = json.Unmarshal(f.Value, &node.Provider)
+		case "node":
+			node.Node = append(json.RawMessage(nil), f.Value...)
+		default:
+			return false
+		}
+		if err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// opensObject is isJSONObject for a node already known to be well formed.
+func opensObject(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) > 0 && trimmed[0] == '{'
+}
+
 func isJSONObject(raw json.RawMessage) bool {
 	trimmed := bytes.TrimSpace(raw)
-	return len(trimmed) > 0 && trimmed[0] == '{' && json.Valid(trimmed)
+	return len(trimmed) > 0 && trimmed[0] == '{' && (strictjson.Valid(trimmed) || json.Valid(trimmed))
 }

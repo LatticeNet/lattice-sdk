@@ -145,12 +145,47 @@ func TestSelectionPlanStructuralRefusals(t *testing.T) {
 		if err := plan.Validate(); err == nil {
 			t.Fatalf("%s: plan accepted", name)
 		}
+		// ValidateTrustingEncoding over the plan's own encoding refuses the same
+		// plans with the same words.
+		if raw, err := json.Marshal(plan); err == nil {
+			if got, want := plan.ValidateTrustingEncoding(raw), plan.Validate(); got == nil || got.Error() != want.Error() {
+				t.Fatalf("%s: ValidateTrustingEncoding answers %v, Validate %v", name, got, want)
+			}
+		}
 	}
 	// A fleet node without a line is the core's to exclude with no_line,
 	// not a broken plan.
 	noLine := SelectionPlan{Kind: SelectionPlanKindNodes, Nodes: []SelectionPlanNode{{Node: json.RawMessage(`{"name":"injected","server":"evil.example"}`)}}}
 	if err := noLine.Validate(); err != nil {
 		t.Fatalf("plan with a lineless fleet node refused: %v", err)
+	}
+	if err := noLine.ValidateTrustingEncoding([]byte(mustJSON(t, noLine))); err != nil {
+		t.Fatalf("ValidateTrustingEncoding refuses a plan with a lineless fleet node: %v", err)
+	}
+	full := SelectionPlan{Kind: SelectionPlanKindNodes, Nodes: []SelectionPlanNode{fleetPlanNode(catalogueLineA), {Provider: true, Node: json.RawMessage(`{"name":"p"}`)}},
+		Selection: &PlanSelection{CatalogueVersion: "lcv1-x", LineUUIDs: []string{catalogueLineA}}}
+	if err, want := full.ValidateTrustingEncoding([]byte(mustJSON(t, full))), full.Validate(); (err == nil) != (want == nil) {
+		t.Fatalf("ValidateTrustingEncoding answers %v on a valid plan, Validate %v", err, want)
+	}
+	if err := full.ValidateTrustingWellFormedNodes(); err != nil {
+		t.Fatalf("ValidateTrustingWellFormedNodes refuses a valid plan: %v", err)
+	}
+	// Bytes the one pass does not admit are not taken on trust: the duplicate
+	// key in a node is found as Validate finds it, whatever raw was passed.
+	dup := cases["duplicate key in a node"]
+	for _, raw := range []string{"", "garbage", `{"kind":"nodes","nodes":[{"a":1,"a":2}]}`} {
+		if got, want := dup.ValidateTrustingEncoding([]byte(raw)), dup.Validate(); got == nil || got.Error() != want.Error() {
+			t.Fatalf("raw %q: ValidateTrustingEncoding answers %v, Validate %v", raw, got, want)
+		}
+	}
+	// Every refusal that does not rest on a node's JSON is the same.
+	for name, plan := range cases {
+		if name == "node not an object" || name == "duplicate key in a node" {
+			continue
+		}
+		if got, want := plan.ValidateTrustingWellFormedNodes(), plan.Validate(); got == nil || got.Error() != want.Error() {
+			t.Fatalf("%s: ValidateTrustingWellFormedNodes answers %v, Validate %v", name, got, want)
+		}
 	}
 }
 

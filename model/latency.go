@@ -21,6 +21,30 @@ import "time"
 // latency probe configuration.
 const MonitorManagedLatency = "latency"
 
+// The kind a latency configuration probes with (LatencyProbeConfig.Method
+// and SourceMethods). Generated checks are one per (target, kind): tcp keeps
+// the id mon_lat_<target> and its history, icmp uses mon_lati_<target> and
+// beacon (LatencyMethodBeacon) mon_latb_<target>.
+const (
+	// LatencyMethodTCP connects to the target's public line port, what
+	// every configuration did before design 29 M2a. An empty Method reads
+	// as tcp, so a stored configuration keeps its paths and history.
+	LatencyMethodTCP = MonitorTypeTCP
+	// LatencyMethodICMP sends MonitorPacketsDefault echoes per run to the
+	// target's public IPv4. A source whose agent does not run icmp reads
+	// unknown (agent_too_old) rather than falling back.
+	LatencyMethodICMP = MonitorTypeICMP
+	// LatencyMethodAuto picks, per source and target, the first kind both
+	// ends support: beacon when the target has an enabled beacon whose
+	// applied plan approved the source and the source runs the beacon
+	// client; else icmp when the source runs it, the target has a public
+	// IPv4 and icmp does not read icmp_filtered for that pair; else tcp
+	// when the target has a TCP line. A pair that has read icmp_filtered
+	// stays on tcp while icmp's latest result for it is that verdict, so the
+	// series does not flap between methods.
+	LatencyMethodAuto = "auto"
+)
+
 // Bounds and defaults of a latency probe configuration.
 const (
 	LatencyProbeDefaultIntervalSec = 60
@@ -52,6 +76,12 @@ type LatencyProbeConfig struct {
 	ExcludeTargets []string `json:"exclude_targets,omitempty"`
 	// DisabledPairs switches single source to target pairs off.
 	DisabledPairs []LatencyPair `json:"disabled_pairs,omitempty"`
+	// Method is the kind every source probes with, a LatencyMethod* value;
+	// empty reads as tcp.
+	Method string `json:"method,omitempty"`
+	// SourceMethods pins the kind for single sources, by source node id,
+	// over Method.
+	SourceMethods map[string]string `json:"source_methods,omitempty"`
 	// Version counts saves. A save must name the version it was made from,
 	// so two operators editing at once cannot overwrite each other.
 	Version   int64     `json:"version"`
@@ -106,6 +136,10 @@ const (
 	LatencyReasonConfigOff     = "config_off"
 	LatencyReasonPairsOff      = "pairs_off"
 	LatencyReasonNoSource      = "no_source"
+	// LatencyReasonSourceMethod: paused because every enabled pair to the
+	// target is held by its source's method (its agent does not run the
+	// kind, or its host refuses it); each pair's Reason says which.
+	LatencyReasonSourceMethod = "source_method"
 )
 
 // What the port rule found on a target (LatencyProbeNode.EndpointNote).
@@ -175,6 +209,16 @@ type LatencyProbeNode struct {
 	LineName     string `json:"line_name,omitempty"`
 	EndpointNote string `json:"endpoint_note,omitempty"`
 	MonitorID    string `json:"monitor_id,omitempty"`
+	// ICMPTarget is the public IPv4 icmp sources send echoes to, empty when
+	// the node has none; ICMPMonitorID is its generated icmp check, set
+	// while that check exists. Endpoint and MonitorID are the tcp ones.
+	ICMPTarget    string `json:"icmp_target,omitempty"`
+	ICMPMonitorID string `json:"icmp_monitor_id,omitempty"`
+	// BeaconTarget is the advertised endpoint beacon sources send to, empty
+	// while the node has no applied, enabled beacon; BeaconMonitorID is its
+	// generated beacon check, set while that check exists.
+	BeaconTarget    string `json:"beacon_target,omitempty"`
+	BeaconMonitorID string `json:"beacon_monitor_id,omitempty"`
 }
 
 // LatencyProbePairState is one source to target pair of the plan.
@@ -187,6 +231,12 @@ type LatencyProbePairState struct {
 	Enabled   bool   `json:"enabled"`
 	Active    bool   `json:"active"`
 	MonitorID string `json:"monitor_id,omitempty"`
+	// Method is the kind the pair probes with (or would, when not active)
+	// and MonitorID that kind's generated check. Reason is a PathReason*
+	// code when an enabled pair is not active because of its source or
+	// method (agent_too_old, icmp_not_permitted, not_probeable).
+	Method string `json:"method,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // Rollup windows.

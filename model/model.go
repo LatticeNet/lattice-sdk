@@ -141,8 +141,22 @@ type Node struct {
 	// Members or display Selector resolves this node); it is never authored by a
 	// client and is not persisted as node intent. Tags/Role remain the underlying
 	// facts that selectors read.
-	GroupIDs  []string  `json:"group_ids,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	GroupIDs []string `json:"group_ids,omitempty"`
+	// ProbeMethods are the monitor kinds this node's agent runs
+	// (MonitorType* values), as its last hello or heartbeat reported them.
+	// Empty means an agent older than design 29 M2a, which reports nothing
+	// and runs exactly tcp and http (EffectiveProbeMethods). A source is
+	// handed only the checks whose kind it runs.
+	ProbeMethods []string `json:"probe_methods,omitempty"`
+	// ProbeRefusals are kinds this agent implements but this host will not
+	// let it run, each with a PathReason* code (icmp_not_permitted when the
+	// kernel's ping_group_range excludes the agent's group). A refused kind
+	// is not in ProbeMethods.
+	ProbeRefusals map[string]string `json:"probe_refusals,omitempty"`
+	// Beacon is what the agent last reported about its beacon responder
+	// (design 29 D12), nil for an agent that reports nothing.
+	Beacon    *BeaconFacts `json:"beacon,omitempty"`
+	CreatedAt time.Time    `json:"created_at"`
 }
 
 // AgentDebugPolicy is the operator-owned diagnostic mode for a node-agent. When
@@ -205,6 +219,10 @@ type AgentConfig struct {
 	// means "no override" — the agent keeps its startup -ip-mode/-ip-resolvers
 	// flags. Old agents that do not know this field ignore it safely.
 	IPConfig *NodeIPConfig `json:"ip_config,omitempty"`
+	// Beacon carries this node's beacon source id, its path keys as a
+	// source and its responder (design 29 D12). Absent when the node has
+	// none of them; agents that do not know the field ignore it.
+	Beacon *AgentBeaconConfig `json:"beacon,omitempty"`
 }
 
 const (
@@ -1606,9 +1624,11 @@ const (
 )
 
 // Monitor is a periodic reachability/latency probe executed by assigned agents.
-// Targets are host:port for tcp/icmp probes and a URL for http probes. A monitor
-// runs on every node when AssignAll is set, otherwise on the nodes in NodeIDs —
-// this is how a group's members continuously measure their group leader.
+// Target is host:port for tcp, an IPv4 literal for icmp and an http or https
+// URL for http. A monitor runs on every node when AssignAll is set, otherwise
+// on the nodes in NodeIDs. Design 29 M2a fields (TargetNode, Packets,
+// ExpectStatus, Headers, SecretsOrigin) are omitted until set, so an agent
+// that predates them decodes the monitor it always did.
 type Monitor struct {
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
@@ -1622,18 +1642,120 @@ type Monitor struct {
 	// leaf certificate's not-after is closer than this many days.
 	ThresholdDays int  `json:"threshold_days,omitempty"`
 	Enabled       bool `json:"enabled"`
+	// TargetNode names the node Target was resolved from, empty when Target
+	// is an address or URL the operator wrote. The control plane resolves it
+	// per kind each time it hands the monitor to an agent (icmp: the node's
+	// public IPv4; tcp: the node's public line port), so a moved address
+	// follows without an edit. An agent dials Target, never TargetNode, and
+	// skips the private-range refusal only when TargetNode is set.
+	TargetNode string `json:"target_node,omitempty"`
+	// Packets is how many echoes one icmp run sends, MonitorPacketSpacingMs
+	// apart, 1 to MonitorPacketsMax; zero reads as MonitorPacketsDefault.
+	// Other kinds send one probe per run and leave it zero.
+	Packets int `json:"packets,omitempty"`
+	// ExpectStatus is an http check's passing statuses, a comma list of
+	// codes and ranges ("200-299,301"); empty reads as
+	// MonitorExpectStatusDefault. The control plane stores the canonical
+	// form (MonitorStatusSet.String).
+	ExpectStatus string `json:"expect_status,omitempty"`
+	// Headers are an http check's request headers. A secret header's Value
+	// reaches only the agents assigned the check; every read the control
+	// plane answers carries its Name with Secret and Set and no Value.
+	Headers []MonitorHeader `json:"headers,omitempty"`
+	// SecretsOrigin is the origin (MonitorOrigin) the secret headers were
+	// saved for, set by the control plane whenever any header is secret. An
+	// agent sends secret headers only on a request to exactly this origin,
+	// over https, without following redirects.
+	SecretsOrigin string `json:"secrets_origin,omitempty"`
 	// ManagedBy names the control-plane feature that generated this monitor
 	// (MonitorManagedLatency), and is empty for a monitor an operator
 	// created. The owner rewrites a managed monitor whenever its own
 	// configuration or the fleet changes, so it is edited through that
 	// configuration and never deleted on its own. Agents ignore the field.
-	ManagedBy string    `json:"managed_by,omitempty"`
+	ManagedBy string `json:"managed_by,omitempty"`
+	// PausedNodeIDs are sources that keep their assignment and their history
+	// but do not run the monitor now: the control plane does not hand it to
+	// them and refuses a result one sends anyway. Each is in NodeIDs, or any
+	// node when AssignAll is set.
+	PausedNodeIDs []string `json:"paused_node_ids,omitempty"`
+	// Alert is the alert policy, a MonitorAlert* value. Empty reads as
+	// MonitorAlertDown, what every monitor did before the field existed.
+	Alert string `json:"alert,omitempty"`
+	// AlertAfter is how many failed runs in a row a source must have before
+	// MonitorAlertDown pages and the path reads down, 1 to
+	// MonitorAlertAfterMax. Zero reads as MonitorAlertAfterDefault.
+	AlertAfter int `json:"alert_after,omitempty"`
+	// Version counts edits. An edit names the version it was made from, so
+	// two operators editing one monitor cannot overwrite each other. A
+	// monitor created before edits existed reads as version zero.
+	Version   int64     `json:"version,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// MonitorResult is a single probe outcome. Agents report them for tcp and http
-// monitors; the server records its own for tls monitors, with NodeID empty.
+// Monitor alert policies (Monitor.Alert).
+const (
+	// MonitorAlertDown pages when a source fails AlertAfter times in a row
+	// and announces the recovery.
+	MonitorAlertDown = "down"
+	// MonitorAlertOff never pages; the monitor's state and history are
+	// kept as for any other.
+	MonitorAlertOff = "off"
+)
+
+// Bounds of Monitor.AlertAfter.
+const (
+	MonitorAlertAfterDefault = 2
+	MonitorAlertAfterMax     = 20
+)
+
+// MonitorUpdate edits one monitor (POST /api/monitors/update). Version is
+// the version the edit was made from. Every other field is optional: absent
+// (or null) keeps the stored value, so an edit names only what it changes.
+// Type and Target are accepted only when they equal the stored values; a
+// different method or target is a new monitor, so one series never mixes
+// two of them. Generated monitors (ManagedBy set) refuse edits.
+//
+// TargetNode follows the Type and Target rule. Headers is a list of
+// per-header operations applied in order to the stored headers; a header it
+// does not name is kept, so an edit that echoes a read (which carries no
+// secret values) can neither wipe nor leak a secret. Absent or empty leaves
+// the headers as they are.
+type MonitorUpdate struct {
+	ID            string              `json:"id"`
+	Version       int64               `json:"version"`
+	Name          *string             `json:"name,omitempty"`
+	Type          *string             `json:"type,omitempty"`
+	Target        *string             `json:"target,omitempty"`
+	TargetNode    *string             `json:"target_node,omitempty"`
+	IntervalSec   *int                `json:"interval_sec,omitempty"`
+	TimeoutSec    *int                `json:"timeout_sec,omitempty"`
+	ThresholdDays *int                `json:"threshold_days,omitempty"`
+	Packets       *int                `json:"packets,omitempty"`
+	ExpectStatus  *string             `json:"expect_status,omitempty"`
+	Headers       []MonitorHeaderEdit `json:"headers,omitempty"`
+	Alert         *string             `json:"alert,omitempty"`
+	AlertAfter    *int                `json:"alert_after,omitempty"`
+	Enabled       *bool               `json:"enabled,omitempty"`
+	AssignAll     *bool               `json:"assign_all,omitempty"`
+	NodeIDs       *[]string           `json:"node_ids,omitempty"`
+	PausedNodeIDs *[]string           `json:"paused_node_ids,omitempty"`
+}
+
+// MonitorResult is a single probe outcome. Agents report them for tcp, http
+// and icmp monitors; the server records its own for tls monitors, with NodeID
+// empty.
+//
+// A multi-packet run (icmp) reports Sent and Lost and the RTT of every echo
+// that came back, in send order, at most MonitorPacketsMax; LatencyMs is
+// their median and Success is true when at least one echo came back. A
+// single-probe run leaves the three zero.
+//
+// Reason marks an outcome that is neither up nor down: the run could not
+// measure the path (a PathReason* code such as icmp_not_permitted,
+// destination_refused or agent_too_old). With Reason set, Success is false
+// and the control plane stores the result for display but counts it as
+// neither a success nor a failure: the path reads unknown with that reason.
 type MonitorResult struct {
 	MonitorID string    `json:"monitor_id"`
 	NodeID    string    `json:"node_id"`
@@ -1643,7 +1765,13 @@ type MonitorResult struct {
 	Error     string    `json:"error,omitempty"`
 	// CertNotAfter is the leaf certificate expiry a tls probe read, set
 	// whenever the handshake completed, whether or not the probe passed.
-	CertNotAfter time.Time `json:"cert_not_after,omitempty"`
+	// It is absent from the wire otherwise (omitzero: omitempty never
+	// omits a struct, so a tcp result used to carry year 1).
+	CertNotAfter time.Time `json:"cert_not_after,omitzero"`
+	Sent         int       `json:"sent,omitempty"`
+	Lost         int       `json:"lost,omitempty"`
+	RTTsMs       []float64 `json:"rtts_ms,omitempty"`
+	Reason       string    `json:"reason,omitempty"`
 }
 
 // LogSource declares a file on a node whose appended lines are tailed by the

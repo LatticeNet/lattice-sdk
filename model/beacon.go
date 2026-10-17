@@ -302,6 +302,38 @@ type BeaconView struct {
 	// SuggestedPort is the random port an enable without a port takes.
 	SuggestedPort int   `json:"suggested_port,omitempty"`
 	Version       int64 `json:"version"`
+	// Replan is present while the beacon needs a change plan before its
+	// sources match what uses it (BeaconReplan).
+	Replan *BeaconReplan `json:"replan,omitempty"`
+}
+
+// BeaconReplan says a node's beacon needs a change plan: the sources that
+// use it now differ from the ones its applied plan approved in a way only an
+// approved plan settles. Nothing re-plans on its own, and nothing is applied
+// without the operator's approval. Request is the body of the POST
+// /api/nodes/beacon/plan that files the plan: a change that keeps the port,
+// the bind address and the endpoint and re-plans the source set (and, under
+// NetGuard, the allow set) from the sources current when it is filed.
+type BeaconReplan struct {
+	NodeID string `json:"node_id"`
+	Name   string `json:"name"`
+	// Reason is PathReasonFirewallPending when NetGuard manages the node,
+	// where an added and a removed source both change the allow set, else
+	// PathReasonBeaconSourcePending, where an added source waits for its
+	// approval.
+	Reason string `json:"reason"`
+	// Added are sources that use the beacon now and that the applied plan
+	// did not approve, as node ids.
+	Added []string `json:"added"`
+	// Removed are sources the applied plan approved that no longer use the
+	// beacon and that NetGuard still admits. Without NetGuard a removed
+	// source leaves the target's table at its next config pull, and no plan
+	// is needed for it.
+	Removed []string `json:"removed"`
+	// PendingApprovalID is an open node.beacon approval for the node, which
+	// may already settle the difference once approved.
+	PendingApprovalID string            `json:"pending_approval_id,omitempty"`
+	Request           BeaconPlanRequest `json:"request"`
 }
 
 // BeaconSourceView is one source of a beacon: approved by the applied plan,

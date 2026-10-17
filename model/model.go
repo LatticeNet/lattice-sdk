@@ -1645,13 +1645,16 @@ type Monitor struct {
 	// TargetNode names the node Target was resolved from, empty when Target
 	// is an address or URL the operator wrote. The control plane resolves it
 	// per kind each time it hands the monitor to an agent (icmp: the node's
-	// public IPv4; tcp: the node's public line port), so a moved address
-	// follows without an edit. An agent dials Target, never TargetNode, and
+	// public IPv4; tcp: the node's public line port; beacon: the endpoint its
+	// applied node.beacon plan advertises), so a moved address follows
+	// without an edit. icmp, tcp and beacon checks take it; a beacon check
+	// always does. An agent dials Target, never TargetNode, and
 	// skips the private-range refusal only when TargetNode is set.
 	TargetNode string `json:"target_node,omitempty"`
-	// Packets is how many echoes one icmp run sends, MonitorPacketSpacingMs
-	// apart, 1 to MonitorPacketsMax; zero reads as MonitorPacketsDefault.
-	// Other kinds send one probe per run and leave it zero.
+	// Packets is how many packets one icmp or beacon run sends,
+	// MonitorPacketSpacingMs apart, 1 to MonitorPacketsMax; zero reads as
+	// MonitorPacketsDefault (MonitorKindSendsPackets). Other kinds send one
+	// probe per run and leave it zero.
 	Packets int `json:"packets,omitempty"`
 	// ExpectStatus is an http check's passing statuses, a comma list of
 	// codes and ranges ("200-299,301"); empty reads as
@@ -1684,7 +1687,8 @@ type Monitor struct {
 	Alert string `json:"alert,omitempty"`
 	// AlertAfter is how many failed runs in a row a source must have before
 	// MonitorAlertDown pages and the path reads down, 1 to
-	// MonitorAlertAfterMax. Zero reads as MonitorAlertAfterDefault.
+	// MonitorAlertAfterMax. Zero reads as MonitorAlertAfterDefault, and a
+	// create and an edit both accept it to mean that default.
 	AlertAfter int `json:"alert_after,omitempty"`
 	// Degraded is the check's degraded thresholds (design 29 D13); nil
 	// reads as every default. A tls check takes none. Generated checks
@@ -1733,6 +1737,19 @@ const (
 	MonitorAlertAfterMax     = 20
 )
 
+// Bounds of Monitor.IntervalSec and Monitor.TimeoutSec that every save of an
+// operator's check enforces, a create and an edit alike: the interval is
+// MonitorIntervalMinSec to MonitorIntervalMaxSec seconds, and the timeout 1
+// to MonitorTimeoutMaxSec seconds and shorter than the interval. A console
+// mirrors them to refuse in the editor what the control plane would refuse
+// on save. The path set has its own bounds (LatencyProbeMinIntervalSec,
+// LatencyProbeMaxTimeoutSec).
+const (
+	MonitorIntervalMinSec = 10
+	MonitorIntervalMaxSec = 24 * 3600
+	MonitorTimeoutMaxSec  = 60
+)
+
 // MonitorUpdate edits one monitor (POST /api/monitors/update). Version is
 // the version the edit was made from. Every other field is optional: absent
 // (or null) keeps the stored value, so an edit names only what it changes.
@@ -1770,14 +1787,14 @@ type MonitorUpdate struct {
 	PausedNodeIDs *[]string            `json:"paused_node_ids,omitempty"`
 }
 
-// MonitorResult is a single probe outcome. Agents report them for tcp, http
-// and icmp monitors; the server records its own for tls monitors, with NodeID
-// empty.
+// MonitorResult is a single probe outcome. Agents report them for tcp, http,
+// icmp and beacon monitors; the server records its own for tls monitors, with
+// NodeID empty.
 //
-// A multi-packet run (icmp) reports Sent and Lost and the RTT of every echo
-// that came back, in send order, at most MonitorPacketsMax; LatencyMs is
-// their median and Success is true when at least one echo came back. A
-// single-probe run leaves the three zero.
+// A multi-packet run (icmp and beacon) reports Sent and Lost and the RTT of
+// every reply that came back, in send order, at most MonitorPacketsMax;
+// LatencyMs is their median and Success is true when at least one reply came
+// back. A single-probe run leaves the three zero.
 //
 // Reason marks an outcome that is neither up nor down: the run could not
 // measure the path (a PathReason* code such as icmp_not_permitted,

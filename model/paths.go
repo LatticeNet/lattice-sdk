@@ -121,7 +121,9 @@ type MonitorSettingsView struct {
 
 // PathSeries is one path over one window (GET /api/monitors/series). Every
 // step is present: a bucket with N zero and Expected above zero is a gap,
-// which reads as unknown, never interpolated.
+// which reads as unknown, never interpolated. A window holds as many steps as
+// fit in its span (one hour at a one-minute step is 60), the last of them
+// the step in progress at To; From is the first step's start.
 type PathSeries struct {
 	Window      string    `json:"window"`
 	StepSeconds int       `json:"step_seconds"`
@@ -151,8 +153,11 @@ type PathMethodChange struct {
 }
 
 // PathBucket is one step of a series. N counts runs and Fail the failed
-// ones; Expected is how many runs the interval would have produced over
-// the part of the step that has passed. The latency figures come from the
+// ones; Expected is how many runs the interval produces over the step. The
+// step in progress (the last, which ends after the series' To) expects the
+// runs certainly due over the part that has passed, and never fewer than it
+// has heard: a run may land before its share of the interval has passed, and
+// one that did was expected. The latency figures come from the
 // successful runs and are null when none succeeded; percentiles are read
 // off a histogram whose bins are about 9 percent wide. JitterMs is the mean
 // absolute difference between consecutive successful runs; Loss is Fail
@@ -180,19 +185,27 @@ type PathBucket struct {
 
 // PathMatrix answers GET /api/monitors/paths: every path the caller may
 // read (both its source and its target node), with its state now and its
-// figures over the window. ObservedAt is when the states were judged; the
-// window figures are cached until the window's next bucket closes.
+// figures over the window. ObservedAt is when the states were judged. The
+// window figures cover the whole buckets of the window's tier (one minute
+// for 1h, five minutes for 6h and 24h, one hour from 3d up) that fit in its
+// span and end where the bucket in progress begins; they are cached until
+// that bucket closes.
 //
 // DegradedAt is when the degraded evaluator last ran, null before its first
 // run after a start. A server that judges degraded always sends the key, so
 // a console shows the degraded state only when it is present.
+//
+// BeaconReplans are the nodes the caller may read whose beacon needs a
+// change plan before its sources match what uses it, always present and
+// empty when none does.
 type PathMatrix struct {
-	Window     string       `json:"window"`
-	ObservedAt time.Time    `json:"observed_at"`
-	DegradedAt *time.Time   `json:"degraded_at"`
-	Sources    []PathSource `json:"sources"`
-	Targets    []PathTarget `json:"targets"`
-	Paths      []PathCell   `json:"paths"`
+	Window        string         `json:"window"`
+	ObservedAt    time.Time      `json:"observed_at"`
+	DegradedAt    *time.Time     `json:"degraded_at"`
+	Sources       []PathSource   `json:"sources"`
+	Targets       []PathTarget   `json:"targets"`
+	Paths         []PathCell     `json:"paths"`
+	BeaconReplans []BeaconReplan `json:"beacon_replans"`
 }
 
 // PathSource is a node some path runs from. The control plane, the source
@@ -218,7 +231,9 @@ type PathTarget struct {
 // check does not exist (a target that was never probeable). Managed marks
 // generated checks. Reason is set only when State is unknown or degraded
 // (a PathReasonDegraded* code). Samples and Expected count runs over the
-// window, as PathBucket's N and Expected do. Prev is the same figures one
+// window's whole buckets (PathMatrix), as PathBucket's N and Expected do, so
+// a path that ran every interval reads Samples equal to Expected. Prev is
+// the same figures one
 // window earlier, null when that window heard nothing; LastAt is the newest
 // run's stamp, null when there is none. Degraded is present only while
 // State is degraded.

@@ -264,3 +264,14 @@ func TestMonitorResultOmitsZeroCertificate(t *testing.T) {
 		t.Fatalf("a tls result lost its expiry: %s", raw)
 	}
 }
+
+// The timing bounds a save enforces are the ones a console mirrors; the
+// timeout fits inside the shortest interval a check may have.
+func TestMonitorTimingBounds(t *testing.T) {
+	if MonitorTimeoutMaxSec != 60 || MonitorIntervalMinSec != 10 || MonitorIntervalMaxSec != 86400 {
+		t.Fatalf("bounds = interval %d to %d, timeout up to %d", MonitorIntervalMinSec, MonitorIntervalMaxSec, MonitorTimeoutMaxSec)
+	}
+	if MonitorTimeoutMaxSec >= MonitorIntervalMaxSec || MonitorIntervalMinSec < 2 {
+		t.Fatal("no interval leaves room for a timeout")
+	}
+}

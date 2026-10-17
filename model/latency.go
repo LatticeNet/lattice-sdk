@@ -88,7 +88,8 @@ type LatencyProbeConfig struct {
 	Alert string `json:"alert,omitempty"`
 	// AlertAfter is how many failed runs in a row a generated path must
 	// have before it reads down and, under a paging policy, pages, 1 to
-	// MonitorAlertAfterMax. Zero reads as MonitorAlertAfterDefault.
+	// MonitorAlertAfterMax. Zero reads as MonitorAlertAfterDefault, as on a
+	// check.
 	AlertAfter int `json:"alert_after,omitempty"`
 	// Degraded is the generated checks' degraded thresholds; nil reads as
 	// every default (design 29 D13).

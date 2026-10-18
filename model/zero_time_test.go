@@ -51,6 +51,7 @@ var zeroTimeOmitted = []struct {
 	{"StorageAccessToken", StorageAccessToken{}, []string{"revoked_at", "last_used_at"}},
 	{"PluginInstallation", PluginInstallation{}, []string{"verified_at", "installed_at", "activated_at", "disabled_at"}},
 	{"DDNSProfile", DDNSProfile{}, []string{"last_run_at"}},
+	{"AgentMirror", AgentMirror{}, []string{"created_at", "updated_at"}},
 }
 
 func lookupJSONPath(t *testing.T, doc map[string]any, path string) (any, bool) {

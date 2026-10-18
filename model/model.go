@@ -304,6 +304,7 @@ const (
 	// AgentFetchKindUpstream is the uncompressed release asset, either the
 	// plan's only source or the control plane's fallback.
 	AgentFetchKindUpstream = "up"
+	// A mirror's kind is AgentFetchKindMirrorPrefix followed by its id.
 )
 
 // Stages an update script can end in, as AgentUpdateFetch.Stage names them.
@@ -356,16 +357,24 @@ type AgentUpdateFetchAttempt struct {
 	// of the budget to the source that delivered the largest part of its
 	// file.
 	SecondPass bool `json:"second_pass,omitempty"`
-	// Kind is cp, cp.gz or up (the AgentFetchKind constants).
+	// Kind is cp, cp.gz, up (the AgentFetchKind constants) or m.<mirror id>.
 	Kind string `json:"kind"`
 	// ExitCode is the fetcher's exit status: curl's, wget's, or 124 when
 	// timeout stopped wget.
 	ExitCode int `json:"exit_code"`
-	// Bytes is what this fetch added to its file.
+	// Bytes is what this fetch added to its file. On a plan with a chunk
+	// manifest it counts what was left after the check that followed the
+	// fetch.
 	Bytes int64 `json:"bytes"`
 	// Seconds is how long the fetch took, nil when the node's date gave no
 	// epoch seconds.
 	Seconds *int64 `json:"seconds,omitempty"`
+	// BadChunks counts the chunks this fetch wrote that failed the plan's
+	// chunk manifest; the download was cut back to the first of them. Every
+	// chunk is written by one source, because the script cuts back the
+	// unchecked tail one source left before another continues the file, so
+	// the count blames exactly the source that sent the wrong bytes.
+	BadChunks int `json:"bad_chunks,omitempty"`
 }
 
 type Metrics struct {

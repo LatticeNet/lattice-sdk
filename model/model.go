@@ -2014,6 +2014,13 @@ type TunnelProfile struct {
 // OIDCProvider is an admin-configured external identity provider for SSO login.
 // ClientSecret is a secret-at-rest field (encrypted by the store boundary) and
 // is never returned by the API.
+//
+// SkipLocalTOTP makes a successful sign-in through this provider the whole
+// first and second factor: the server starts the session without asking for
+// the account's local authenticator code, even when the account has TOTP
+// enabled. It is false by default, and false keeps the local TOTP step. It
+// only affects sign-in; a step-up for a sensitive action still asks for a
+// fresh second factor.
 type OIDCProvider struct {
 	ID             string    `json:"id"`
 	DisplayName    string    `json:"display_name"`
@@ -2023,6 +2030,7 @@ type OIDCProvider struct {
 	Scopes         []string  `json:"scopes,omitempty"`
 	AllowedDomains []string  `json:"allowed_domains,omitempty"`
 	Enabled        bool      `json:"enabled"`
+	SkipLocalTOTP  bool      `json:"skip_local_totp,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
@@ -2032,11 +2040,21 @@ type OIDCProvider struct {
 // admin-vetted provider record, not the bare issuer string, so a second
 // provider that happens to share an issuer cannot reuse another provider's
 // links. Subject is the stable identifier; Email/Issuer are reference only.
+//
+// SecondFactorAt is when the linked account last completed its local second
+// factor in a sign-in that started at this provider subject, and
+// SecondFactorEpoch is the account's security epoch at that moment. Both are
+// unset until that happens. A provider with SkipLocalTOTP skips the local
+// step only through a link confirmed this way in the account's current
+// epoch, so a subject the account never confirmed (a first sign-in matched by
+// email) still meets the local second factor once.
 type OIDCIdentity struct {
-	ProviderID string    `json:"provider_id"`
-	Issuer     string    `json:"issuer"`
-	Subject    string    `json:"subject"`
-	UserID     string    `json:"user_id"`
-	Email      string    `json:"email,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
+	ProviderID        string    `json:"provider_id"`
+	Issuer            string    `json:"issuer"`
+	Subject           string    `json:"subject"`
+	UserID            string    `json:"user_id"`
+	Email             string    `json:"email,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	SecondFactorAt    time.Time `json:"second_factor_at,omitzero"`
+	SecondFactorEpoch uint64    `json:"second_factor_epoch,omitempty"`
 }

@@ -52,6 +52,7 @@ var zeroTimeOmitted = []struct {
 	{"PluginInstallation", PluginInstallation{}, []string{"verified_at", "installed_at", "activated_at", "disabled_at"}},
 	{"DDNSProfile", DDNSProfile{}, []string{"last_run_at"}},
 	{"AgentMirror", AgentMirror{}, []string{"created_at", "updated_at"}},
+	{"OIDCIdentity", OIDCIdentity{}, []string{"second_factor_at"}},
 }
 
 func lookupJSONPath(t *testing.T, doc map[string]any, path string) (any, bool) {

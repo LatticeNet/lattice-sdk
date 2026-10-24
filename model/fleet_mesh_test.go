@@ -48,7 +48,7 @@ func TestPathMeasurement(t *testing.T) {
 		PathReasonPacketBudget: PathSkipped, PathReasonBeaconSourcePending: PathSkipped, PathReasonBeaconNotEnabled: PathSkipped,
 		PathReasonFirewallPending: PathSkipped, PathReasonRefusedByNode: PathSkipped,
 		PathReasonSourcePaused: PathPaused,
-		PathReasonNoData: PathMeasured, PathReasonAgentOffline: PathMeasured, PathReasonICMPFiltered: PathMeasured,
+		PathReasonNoData:       PathMeasured, PathReasonAgentOffline: PathMeasured, PathReasonICMPFiltered: PathMeasured,
 		PathReasonDestinationRefused: PathMeasured, PathReasonBeaconNotListening: PathMeasured,
 	} {
 		if got := PathMeasurement(PathStateUnknown, reason); got != want {

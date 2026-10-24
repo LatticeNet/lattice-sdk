@@ -824,8 +824,14 @@ type GroupNetPolicy struct {
 	Rules        []GroupNetRule  `json:"rules"`
 	Enabled      bool            `json:"enabled"`
 	Priority     int             `json:"priority"` // lower merges first when several policies reach a node
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
+	// Version counts the policy's saves; the server sets it. A save that
+	// names a version must name the stored one, so an editor working from a
+	// copy that changed since it was read is refused instead of overwriting
+	// the newer policy. A save that names none (zero) is not checked, which
+	// is how a client that predates the field keeps working.
+	Version   int64     `json:"version,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // TargetScope returns the policy's target selector: Scope when it is set,

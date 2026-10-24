@@ -634,6 +634,13 @@ type DNSDeployment struct {
 	EnableUDP  bool   `json:"enable_udp"`
 	EnableTCP  bool   `json:"enable_tcp"`
 	Exposure   string `json:"exposure"`
+	// AllowedClientNetworks are the source prefixes (CIDR, or a bare address
+	// for one host) the resolver answers. The server renders them as a
+	// CoreDNS acl that refuses every other client. A public deployment with a
+	// forward zone must name at least one, or it would be an open recursive
+	// resolver. Empty means no acl: every client that reaches the listener
+	// gets an answer.
+	AllowedClientNetworks []string `json:"allowed_client_networks,omitempty"`
 
 	Zones []DNSZone `json:"zones"`
 

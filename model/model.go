@@ -788,9 +788,11 @@ type Group struct {
 
 // GroupSelector is a dynamic "smart group" membership rule. Dashboard grouping
 // uses it for previews, and group-policy planning uses the current match set
-// when expanding policies into per-node nft plans. Each field is an OR-set; a
-// node matches the selector when it satisfies any one of the populated criteria
-// (tags-any / roles / country / continent).
+// when expanding policies into per-node nft plans. Each field is an OR-set (a
+// node need only match one value within it), and the populated fields combine
+// with AND: a node matches the selector only when it satisfies every populated
+// criterion (tags-any, roles, country, continent). A selector with no populated
+// criterion matches no node.
 type GroupSelector struct {
 	MatchTagsAny   []string `json:"match_tags_any,omitempty"`
 	MatchRoles     []string `json:"match_roles,omitempty"`

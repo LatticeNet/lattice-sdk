@@ -240,9 +240,29 @@ func TestProtoContractsExistAndStayRedacted(t *testing.T) {
 		"repeated string zone_ids = 4;",
 		"bool managed = 5;",
 		"string applied_table_sha = 10;",
+		"repeated DerivedSecurityGroup applied_derived = 13;",
 	} {
 		if !strings.Contains(nodeGuardBinding, field) {
 			t.Fatalf("NodeGuardBinding missing field %s", field)
+		}
+	}
+	nodeGroupGuardBinding := messageBody(t, string(common), "NodeGroupGuardBinding")
+	for _, field := range []string{
+		"string group_id = 1;",
+		"repeated string security_group_ids = 2;",
+		"int64 version = 3;",
+	} {
+		if !strings.Contains(nodeGroupGuardBinding, field) {
+			t.Fatalf("NodeGroupGuardBinding missing field %s", field)
+		}
+	}
+	derivedSecurityGroup := messageBody(t, string(common), "DerivedSecurityGroup")
+	for _, field := range []string{
+		"string security_group_id = 1;",
+		"string node_group_id = 2;",
+	} {
+		if !strings.Contains(derivedSecurityGroup, field) {
+			t.Fatalf("DerivedSecurityGroup missing field %s", field)
 		}
 	}
 	guardReality := messageBody(t, string(common), "GuardNodeReality")

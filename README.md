@@ -41,8 +41,10 @@ github.com/LatticeNet/lattice-sdk
   artifact digest/signature fields, and stdio/gRPC payloads.
 
 Errors are part of the contract. HTTP JSON APIs return the `model.APIError`
-shape and proto APIs reserve `ApiError` with `code`, `message`, and
-`request_id`; clients must branch on `code` rather than scraping message text.
+shape and proto APIs reserve `ApiError` with `code`, `message`, `request_id`
+and, on a refused save, `field` (a path into the request body, such as
+`targets.exclude[1]`, that an editor focuses); clients must branch on `code`
+rather than scraping message text.
 Every HTTP response also carries `X-Lattice-Request-ID`, matching
 `ApiError.request_id` on failures and `AuditEvent.correlation_id` on correlated
 authorization denial, authenticated allow, login, and agent task/event audit
@@ -57,7 +59,8 @@ The `model.APIError*` constants are the canonical JSON/proto code strings.
 `message` is public and may be deliberately generic for server-side failures.
 Security-sensitive codes include `capability_denied`, `invalid_node_token`,
 `invalid_task_lease`, and `task_output_limit_exceeded`; approval workflow codes
-include `approval_stale` and `agent_update_noop`. Clients should treat these
+include `approval_stale` and `agent_update_noop`; a save that lost a race
+answers `version_conflict`. Clients should treat these
 codes as stable automation signals and avoid branching on localized messages.
 Rendered approvals also expose machine-readable stale metadata: use
 `Approval.Stale` and `Approval.StaleCode` instead of parsing the operator-facing

@@ -1502,10 +1502,20 @@ type AuditEvent struct {
 // APIError is the stable machine-readable error shape shared by server,
 // dashboard, agents and plugins. Messages are user-facing; callers should make
 // authorization and retry decisions from Code.
+//
+// Field names the part of the request a refused save is about, so an editor
+// can focus and mark it (lattice docs design 32 R6). It is a path into the
+// request's JSON body: object keys as they appear on the wire joined by dots,
+// and an array element as its zero-based index in brackets, with no leading
+// marker, for example "name", "targets.exclude[1]", "addresses[0]" or
+// "rules[2].ports". It names the deepest part the server can point at, which
+// may be a whole list or object. Empty when the refusal is not about one
+// field.
 type APIError struct {
 	Code      string `json:"code"`
 	Message   string `json:"message"`
 	RequestID string `json:"request_id"`
+	Field     string `json:"field,omitempty"`
 }
 
 type APIErrorResponse struct {
@@ -1530,6 +1540,11 @@ const (
 	APIErrorInvalidNodeToken        = "invalid_node_token"
 	APIErrorInvalidTaskLease        = "invalid_task_lease"
 	APIErrorTaskOutputLimitExceeded = "task_output_limit_exceeded"
+	// APIErrorVersionConflict answers a save (HTTP 409) that named a version
+	// other than the stored one: someone saved in between. The editor reads
+	// the object again, names what changed, and lets the operator keep their
+	// draft by saving it over the new version (design 32 R6).
+	APIErrorVersionConflict = "version_conflict"
 )
 
 type KVEntry struct {

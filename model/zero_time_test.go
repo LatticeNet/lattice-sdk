@@ -155,6 +155,7 @@ var alwaysSetTimes = map[string]string{
 	"GuardSSHDFacts.ObservedAt":      "agent, behind a nil-able pointer",
 	"LatencyBucket.At":               "computed bucket",
 	"LatencyRollups.GeneratedAt":     "computed per response",
+	"LatencyProbeMigration.At":       "server, when it migrates, behind a nil-able pointer",
 	"LatencySeries.From":             "computed window",
 	"LatencySeries.To":               "computed window",
 	"LineCatalogueProbe.At":          "set with the verdict, behind a nil-able pointer",

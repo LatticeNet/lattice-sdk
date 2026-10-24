@@ -814,7 +814,11 @@ type GroupSelector struct {
 // one group and nothing else, so a reader that knows only the older field
 // still sees the right group.
 type GroupNetPolicy struct {
-	ID           string          `json:"id"`             // "gnp_<ulid>"
+	ID string `json:"id"` // "gnp_<ulid>"
+	// Name is the operator's label for the policy, shown wherever the policy
+	// is listed or named (a node group's Used by, a refused group delete).
+	// Optional; a policy without one is named by its target.
+	Name         string          `json:"name,omitempty"`
 	ScopeGroupID string          `json:"scope_group_id"` // alias for Scope {groups: [id]}; see TargetScope
 	Scope        *TargetSelector `json:"scope,omitempty"`
 	Rules        []GroupNetRule  `json:"rules"`

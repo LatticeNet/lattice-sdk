@@ -923,9 +923,12 @@ type GuardRule struct {
 	Direction string           `json:"direction"` // ingress | egress
 	Protocol  string           `json:"protocol"`  // tcp | udp | icmp | icmpv6 | any
 	Ports     []GuardPortRange `json:"ports,omitempty"`
-	Remote    NetEndpoint      `json:"remote"` // Kind may additionally be NetRefZone
-	Log       bool             `json:"log,omitempty"`
-	Disabled  bool             `json:"disabled,omitempty"`
+	// Remote may also be NetRefZone. NetRefGroup expands at compile time to
+	// every member's own addresses; NetRefDomain is refused, since a name is
+	// not a trustworthy source identity.
+	Remote   NetEndpoint `json:"remote"`
+	Log      bool        `json:"log,omitempty"`
+	Disabled bool        `json:"disabled,omitempty"`
 }
 
 // SecurityGroup is a named, reusable, ordered rule set attachable to any
@@ -943,7 +946,8 @@ type SecurityGroup struct {
 }
 
 // NodeGuardBinding composes a node's effective firewall: base scaffold, then
-// trusted zones, then Overrides, then attached groups in GroupIDs order.
+// trusted zones, then Overrides, then attached groups in GroupIDs order, then
+// the groups its node groups bind (NodeGroupGuardBinding).
 // Managed=false marks an observe-only node the compiler must refuse to plan.
 // The Last*/AppliedTableSHA fields carry apply state and the drift anchor the
 // legacy NFTInputs record never had (design-13 §4.2).
@@ -958,8 +962,36 @@ type NodeGuardBinding struct {
 	LastAppliedAt   time.Time   `json:"last_applied_at,omitzero"`
 	LastError       string      `json:"last_error,omitempty"`
 	AppliedTableSHA string      `json:"applied_table_sha,omitempty"`
-	CreatedAt       time.Time   `json:"created_at"`
-	UpdatedAt       time.Time   `json:"updated_at"`
+	// AppliedDerived is the derived security groups the last successful
+	// apply compiled, in compile order. The server writes it when an apply
+	// succeeds and ignores it on upsert; the node-group batch plan compares
+	// it with what the node derives now to find members that joined or left.
+	AppliedDerived []DerivedSecurityGroup `json:"applied_derived,omitempty"`
+	CreatedAt      time.Time              `json:"created_at"`
+	UpdatedAt      time.Time              `json:"updated_at"`
+}
+
+// NodeGroupGuardBinding binds security groups to a node group (design 32 D3).
+// Every member NetGuard manages compiles them after its own groups; a member
+// NetGuard does not manage is never adopted by it, and the binding stays
+// inactive there until the node is adopted. SecurityGroupIDs is compile
+// order within the node group; across node groups, derived groups follow
+// the node groups' names. A change reaches a node only through a NetGuard
+// plan the operator approves. Version implements optimistic concurrency as
+// on SecurityGroup.
+type NodeGroupGuardBinding struct {
+	GroupID          string    `json:"group_id"`
+	SecurityGroupIDs []string  `json:"security_group_ids"`
+	Version          int64     `json:"version"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+// DerivedSecurityGroup is one security group a node receives through a
+// node group's binding rather than its own.
+type DerivedSecurityGroup struct {
+	SecurityGroupID string `json:"security_group_id"`
+	NodeGroupID     string `json:"node_group_id"`
 }
 
 // GuardListener is one listening socket from a node reality report.

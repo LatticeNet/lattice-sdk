@@ -500,4 +500,8 @@ message ApiError {
   // Public, user-facing message. Server-side 5xx details must be redacted.
   string message = 2;
   string request_id = 3;
+  // The part of the request a refused save is about: object keys joined by
+  // dots, array elements as [index], for example "targets.exclude[1]".
+  // Empty when the refusal is not about one field.
+  string field = 4;
 }

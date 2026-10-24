@@ -16,6 +16,12 @@ import "time"
 // public, never SSH and never a knock-gated port, and its latency is the
 // handshake round trip as the source saw it. The control plane owns the rule
 // that picks the port (lattice-server internal/server/latency_probes.go).
+//
+// Design 32 R1 migrates the configuration into ordinary check definitions
+// named Fleet mesh. The stored configuration stays, with Migrated set, so a
+// release before the migration still reads it after a rollback and re-owns
+// the same monitor ids; a migrated server reads it as migrated and refuses
+// writes, and a later release removes it.
 
 // MonitorManagedLatency is Monitor.ManagedBy on a monitor generated from the
 // latency probe configuration.
@@ -99,6 +105,17 @@ type LatencyProbeConfig struct {
 	Version   int64     `json:"version"`
 	UpdatedAt time.Time `json:"updated_at,omitzero"`
 	UpdatedBy string    `json:"updated_by,omitempty"`
+	// Migrated is set once the configuration became check definitions
+	// (design 32 R1): it no longer generates anything, and a save is
+	// refused with the definitions to edit instead.
+	Migrated *LatencyProbeMigration `json:"migrated,omitempty"`
+}
+
+// LatencyProbeMigration records the migration of the path set into check
+// definitions: when, and the definitions it made.
+type LatencyProbeMigration struct {
+	At          time.Time `json:"at"`
+	Definitions []string  `json:"definitions"`
 }
 
 // LatencyPair names one source to target pair by node id.
@@ -152,6 +169,10 @@ const (
 	// target is held by its source's method (its agent does not run the
 	// kind, or its host refuses it); each pair's Reason says which.
 	LatencyReasonSourceMethod = "source_method"
+	// LatencyReasonMigrated: the configuration is migrated into check
+	// definitions (design 32 R1), so it makes no target; the node's
+	// endpoints are still reported.
+	LatencyReasonMigrated = "migrated"
 )
 
 // What the port rule found on a target (LatencyProbeNode.EndpointNote).

@@ -1,19 +1,14 @@
 package model
 
-// TargetSelector chooses nodes for a target field (lattice docs design 32
-// D5). Check sources and targets, policy targets and remotes, security-group
-// bindings and mesh membership share this one stored shape. It is stored as
-// written and resolved each time it is used, so a node that joins a named
-// group joins whatever the selector targets, and one that leaves it leaves.
+// TargetSelector chooses a set of nodes for anything that targets nodes:
+// check sources and targets, outbound policy targets, and later security
+// group bindings and mesh membership (design 32 D5). It is stored as written
+// and resolved when used, so a node that joins a named group joins the target.
 //
-// A node is selected when All is set, when Nodes names it, or when it is a
-// member of a group Groups names; a node Exclude names is never selected,
-// whatever else matches it. Group criteria resolve through the existing
-// group resolver (lattice-server internal/groups): a group's members are its
-// explicit Members together with the nodes its GroupSelector matches, and a
-// GroupSelector's set criteria combine with AND. Tags are not a criterion of
-// their own: selecting by tag means naming a group whose selector matches
-// that tag. A selector with nothing set selects no node.
+// The resolved set is the union of the named nodes, the members of the named
+// groups, and every node when All is set, minus the nodes in Exclude. A node
+// group's own selector already matches tags, so a tag is selected by making a
+// group for it rather than by a criterion here.
 type TargetSelector struct {
 	Nodes   []string `json:"nodes,omitempty"`
 	Groups  []string `json:"groups,omitempty"`

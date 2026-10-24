@@ -1551,6 +1551,10 @@ const (
 	// the object again, names what changed, and lets the operator keep their
 	// draft by saving it over the new version (design 32 R6).
 	APIErrorVersionConflict = "version_conflict"
+	// APIErrorPathSetMigrated answers a write to the path set once it is
+	// migrated into check definitions (design 32 R1); the message names
+	// the definitions to edit instead.
+	APIErrorPathSetMigrated = "path_set_migrated"
 )
 
 type KVEntry struct {
@@ -1830,6 +1834,14 @@ type Monitor struct {
 	// configuration or the fleet changes, so it is edited through that
 	// configuration and never deleted on its own. Agents ignore the field.
 	ManagedBy string `json:"managed_by,omitempty"`
+	// CheckDefinitionID names the check definition that owns a monitor it
+	// adopted from the path set (design 32 R1). Such a monitor keeps
+	// ManagedBy MonitorManagedLatency, so a release before the migration,
+	// which does not know this field, re-owns it as a path set monitor
+	// after a rollback; every other definition monitor is marked by
+	// ManagedBy alone. The owner is read from this field first. Agents
+	// ignore it.
+	CheckDefinitionID string `json:"check_definition_id,omitempty"`
 	// PausedNodeIDs are sources that keep their assignment and their history
 	// but do not run the monitor now: the control plane does not hand it to
 	// them and refuses a result one sends anyway. Each is in NodeIDs, or any

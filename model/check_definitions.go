@@ -24,11 +24,30 @@ import "time"
 // paused targets, both of which name the monitors and their runs first, or
 // when the target node is removed from the fleet.
 //
-// The path set (LatencyProbeConfig) is listed beside the definitions as the
-// built-in check named Fleet mesh, with its own editor and its own ids.
+// The path set (LatencyProbeConfig) was migrated into ordinary definitions
+// named Fleet mesh (design 32 R1): one per distinct method its sources used,
+// with the path set's disabled pairs as excluded pairs and its region rule as
+// the whole fleet minus the nodes the rule left out at migration time. Their
+// Adopted map keeps the path set's monitor ids, so its history continues. A
+// fresh install seeds the same definition from the path set's defaults.
 
 // CheckDefinitionIDPrefix starts every definition id.
 const CheckDefinitionIDPrefix = "chk_"
+
+// CheckMethodAuto is a definition's Type when the control plane chooses the
+// method per pair, as the path set's auto did (LatencyMethodAuto): the
+// beacon when the target's applied plan approved the source and the target
+// listens, else icmp when the source runs it, the target has a public IPv4
+// and icmp does not read icmp_filtered for the pair, else tcp to the port
+// rule's endpoint, else icmp. It takes target nodes only. Its monitors are
+// one per (target, method chosen), each holding the sources that use that
+// method now, so a pair's series can cross a method switch.
+const CheckMethodAuto = LatencyMethodAuto
+
+// CheckFleetMeshID is the definition the path set migrates into, and
+// CheckFleetMeshID plus "_" plus a method names the one made for sources the
+// path set pinned to another method. A fresh install seeds CheckFleetMeshID.
+const CheckFleetMeshID = CheckDefinitionIDPrefix + "fleet_mesh"
 
 // Bounds of a check definition.
 const (
@@ -48,18 +67,25 @@ const (
 	// CheckDefinitionPausedMax bounds the paused targets a save may leave a
 	// definition holding; past it, forget some first.
 	CheckDefinitionPausedMax = 256
+	// CheckDefinitionExcludedPairsMax bounds a definition's excluded pairs.
+	CheckDefinitionExcludedPairsMax = 4096
 )
 
 // CheckDefinitionSpec is what an operator writes: everything but the
 // identity, the request headers and the bookkeeping.
 //
-// Type is the method, a MonitorType* value: tcp, icmp, beacon, http or tls.
-// Sources selects the nodes that run it; a tls check runs on the control
-// plane and takes no sources. Targets selects target nodes for tcp, icmp and
-// beacon. Addresses are external targets, each its own target: absolute
-// URLs for http, host:port for tcp and tls, IPv4 addresses for icmp. A tcp
-// or icmp definition may name both; beacon takes nodes only, http and tls
-// addresses only.
+// Type is the method, a MonitorType* value: tcp, icmp, beacon, http or tls,
+// or CheckMethodAuto. Sources selects the nodes that run it; a tls check runs
+// on the control plane and takes no sources. Targets selects target nodes
+// for tcp, icmp, beacon and auto. Addresses are external targets, each its
+// own target: absolute URLs for http, host:port for tcp and tls, IPv4
+// addresses for icmp. A tcp or icmp definition may name both; beacon and
+// auto take nodes only, http and tls addresses only.
+//
+// ExcludedPairs are source to target node pairs the definition never
+// measures although both ends are in its sets ("Stop measuring this pair"),
+// each naming a source of the definition. An excluded pair keeps the
+// history it has; including it again resumes it.
 //
 // The remaining fields mean what they mean on a Monitor and are copied onto
 // every expanded monitor; an edit to any of them rewrites every expanded
@@ -80,6 +106,7 @@ type CheckDefinitionSpec struct {
 	AlertAfter    int                  `json:"alert_after,omitempty"`
 	Degraded      *MonitorDegradedRule `json:"degraded,omitempty"`
 	Enabled       bool                 `json:"enabled"`
+	ExcludedPairs []LatencyPair        `json:"excluded_pairs,omitempty"`
 }
 
 // CheckDefinition is a stored definition.
@@ -96,12 +123,26 @@ type CheckDefinition struct {
 	CheckDefinitionSpec
 	Headers        []MonitorHeader `json:"headers,omitempty"`
 	SecretsOrigins []string        `json:"secrets_origins,omitempty"`
+	// Adopted are the monitors the definition took over from the path set
+	// when it was migrated, by method and target node: expansion uses
+	// exactly these ids for exactly these keys, so their history continues,
+	// and hashed ids for every other key. Written once by the migration and
+	// never by a save.
+	Adopted []CheckAdoption `json:"adopted,omitempty"`
 	// Version counts saves. An edit names the version it was read at, so
 	// two operators editing one definition cannot overwrite each other.
 	Version   int64     `json:"version"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	UpdatedBy string    `json:"updated_by,omitempty"`
+}
+
+// CheckAdoption is one monitor a definition adopted: the id it keeps for
+// the method and target node.
+type CheckAdoption struct {
+	Method     string `json:"method"`
+	TargetNode string `json:"target_node"`
+	MonitorID  string `json:"monitor_id"`
 }
 
 // CheckDefinitionSave is the body of a create (POST
@@ -175,6 +216,10 @@ type CheckDefinitionMonitor struct {
 // CheckFleetMesh is the path set listed as the built-in check named Fleet
 // mesh. It keeps its own editor (GET and PUT /api/monitors/latency); these
 // are its counts against the fleet now.
+//
+// Deprecated: the path set is migrated into ordinary definitions (design 32
+// R1). A migrated server sends Migrated with the definitions' ids and zero
+// counts for one release; read Definitions instead.
 type CheckFleetMesh struct {
 	Name    string `json:"name"`
 	Enabled bool   `json:"enabled"`
@@ -188,6 +233,9 @@ type CheckFleetMesh struct {
 	Targets       int `json:"targets"`
 	Paths         int `json:"paths"`
 	PausedTargets int `json:"paused_targets"`
+	// Migrated says the path set is now these definitions.
+	Migrated    bool     `json:"migrated,omitempty"`
+	Definitions []string `json:"definitions,omitempty"`
 }
 
 // CheckFleetMeshName is the name the path set is listed under.

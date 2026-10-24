@@ -82,6 +82,36 @@ const (
 	PathReasonPacketBudget = "packet_budget"
 )
 
+// Whether a path is measured (design 32 R2). A check skips a pair when the
+// method has nothing to dial on the target, the source cannot run the method
+// or its host refuses it, a beacon or firewall approval is pending, or the
+// pair is over the packet budget; a pair is paused when its check or its
+// source is paused or its target left the set. Those are facts about
+// configuration, not the health of a path: a console leaves them out of
+// its default graph, list and counts and shows them on request. Every other
+// state, unknown included, is a measured path.
+const (
+	PathMeasured = ""
+	PathSkipped  = "skipped"
+	PathPaused   = "paused"
+)
+
+// PathMeasurement is whether a path in state for reason is measured,
+// skipped or paused (PathMeasured, PathSkipped, PathPaused).
+func PathMeasurement(state, reason string) string {
+	if state != PathStateUnknown {
+		return PathMeasured
+	}
+	switch reason {
+	case PathReasonNotProbeable, PathReasonAgentTooOld, PathReasonICMPNotPermitted, PathReasonPacketBudget,
+		PathReasonBeaconNotEnabled, PathReasonFirewallPending, PathReasonBeaconSourcePending, PathReasonRefusedByNode:
+		return PathSkipped
+	case PathReasonSourcePaused:
+		return PathPaused
+	}
+	return PathMeasured
+}
+
 // Monitor history retention.
 const (
 	MonitorFineRetentionDefaultDays = 7
@@ -124,12 +154,18 @@ type MonitorSettingsView struct {
 	UpdatedBy           string    `json:"updated_by,omitempty"`
 }
 
-// PathSeries is one path over one window (GET /api/monitors/series). Every
+// PathSeries is one path over one window (GET /api/monitors/series). A pair
+// with a target node is asked for as source and target_node, plus check to
+// choose which check's series when several measure the pair (a definition
+// id, or a single check's monitor id); without check the first check on the
+// pair answers, measured checks before paused ones, then by name. Check
+// names the check that answered. Every
 // step is present: a bucket with N zero and Expected above zero is a gap,
 // which reads as unknown, never interpolated. A window holds as many steps as
 // fit in its span (one hour at a one-minute step is 60), the last of them
 // the step in progress at To; From is the first step's start.
 type PathSeries struct {
+	Check       string    `json:"check,omitempty"`
 	Window      string    `json:"window"`
 	StepSeconds int       `json:"step_seconds"`
 	From        time.Time `json:"from"`
@@ -233,8 +269,8 @@ type PathTarget struct {
 // PathCell is one path. TargetNode is the node a generated check reaches,
 // or the node an operator check's address resolves to, else empty; Target
 // is what the method dials. MonitorID is empty for a generated path whose
-// check does not exist (a target that was never probeable). Managed marks
-// generated checks. Reason is set only when State is unknown or degraded
+// check does not exist (a target that was never probeable). Reason is set
+// only when State is unknown or degraded
 // (a PathReasonDegraded* code). Samples and Expected count runs over the
 // window's whole buckets (PathMatrix), as PathBucket's N and Expected do, so
 // a path that ran every interval reads Samples equal to Expected. Prev is
@@ -242,24 +278,34 @@ type PathTarget struct {
 // window earlier, null when that window heard nothing; LastAt is the newest
 // run's stamp, null when there is none. Degraded is present only while
 // State is degraded.
+//
+// A path is a (source, target) pair whichever check measures it (design 32
+// R1): a console keys every pair with a target node as source~target node
+// and an external target as source~@monitor id, and lists every check on a
+// pair. CheckDefinitionID names the definition a cell's monitor was expanded
+// from, empty for a single check. Managed is deprecated: it marks the cells
+// of the definitions migrated from the path set, is sent for one release,
+// and is then removed; key by the pair instead.
 type PathCell struct {
-	Source     string           `json:"source"`
-	TargetNode string           `json:"target_node"`
-	Target     string           `json:"target"`
-	MonitorID  string           `json:"monitor_id"`
-	Managed    bool             `json:"managed"`
-	Method     string           `json:"method"`
-	State      string           `json:"state"`
-	Reason     string           `json:"reason"`
-	P50Ms      *float64         `json:"p50_ms"`
-	P95Ms      *float64         `json:"p95_ms"`
-	JitterMs   *float64         `json:"jitter_ms"`
-	Loss       *float64         `json:"loss"`
-	Samples    int              `json:"samples"`
-	Expected   int              `json:"expected"`
-	Prev       *PathPrev        `json:"prev"`
-	LastAt     *time.Time       `json:"last_at"`
-	Degraded   *PathDegradation `json:"degraded,omitempty"`
+	Source     string `json:"source"`
+	TargetNode string `json:"target_node"`
+	Target     string `json:"target"`
+	MonitorID  string `json:"monitor_id"`
+	// Deprecated: key by the pair (design 32 R1).
+	Managed           bool             `json:"managed"`
+	CheckDefinitionID string           `json:"check_definition_id,omitempty"`
+	Method            string           `json:"method"`
+	State             string           `json:"state"`
+	Reason            string           `json:"reason"`
+	P50Ms             *float64         `json:"p50_ms"`
+	P95Ms             *float64         `json:"p95_ms"`
+	JitterMs          *float64         `json:"jitter_ms"`
+	Loss              *float64         `json:"loss"`
+	Samples           int              `json:"samples"`
+	Expected          int              `json:"expected"`
+	Prev              *PathPrev        `json:"prev"`
+	LastAt            *time.Time       `json:"last_at"`
+	Degraded          *PathDegradation `json:"degraded,omitempty"`
 }
 
 // PathPrev is a path's figures over the window before the one asked for.

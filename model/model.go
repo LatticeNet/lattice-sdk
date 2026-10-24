@@ -800,18 +800,50 @@ type GroupSelector struct {
 	MatchContinent []string `json:"match_continent,omitempty"` // AS/EU/NA/SA/AF/OC/AN
 }
 
-// GroupNetPolicy is a group-scoped authoring layer over the unchanged per-node
-// NetPolicy engine. The server expands it into one NetPolicy per member of
-// ScopeGroupID before compilation; the agent never receives it. Priority breaks
-// ties when a node is a member of two or more scoped groups (lower wins).
+// GroupNetPolicy is the outbound policy authoring layer over the unchanged
+// per-node NetPolicy engine. Its target is a selector: one node, several
+// nodes, node groups or the whole fleet are all one GroupNetPolicy. The server
+// expands it into one NetPolicy per resolved target node before compilation;
+// the agent never receives it. When several policies reach one node their
+// rules merge in Priority order (lower first), then by ID.
+//
+// Scope is the target. ScopeGroupID is the older form and stays an alias: a
+// policy without Scope targets the members of ScopeGroupID, which is read as
+// the one-group selector {groups: [ScopeGroupID]}. TargetScope applies that
+// rule. The server sets ScopeGroupID as well when a stored Scope names exactly
+// one group and nothing else, so a reader that knows only the older field
+// still sees the right group.
 type GroupNetPolicy struct {
-	ID           string         `json:"id"`             // "gnp_<ulid>"
-	ScopeGroupID string         `json:"scope_group_id"` // applies to members of this group
-	Rules        []GroupNetRule `json:"rules"`
-	Enabled      bool           `json:"enabled"`
-	Priority     int            `json:"priority"` // lower wins when a node is in 2+ scoped groups
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
+	ID string `json:"id"` // "gnp_<ulid>"
+	// Name is the operator's label for the policy, shown wherever the policy
+	// is listed or named (a node group's Used by, a refused group delete).
+	// Optional; a policy without one is named by its target.
+	Name         string          `json:"name,omitempty"`
+	ScopeGroupID string          `json:"scope_group_id"` // alias for Scope {groups: [id]}; see TargetScope
+	Scope        *TargetSelector `json:"scope,omitempty"`
+	Rules        []GroupNetRule  `json:"rules"`
+	Enabled      bool            `json:"enabled"`
+	Priority     int             `json:"priority"` // lower merges first when several policies reach a node
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+}
+
+// TargetScope returns the policy's target selector: Scope when it is set,
+// otherwise the one-group selector ScopeGroupID stands for, otherwise an
+// empty selector, which targets no node.
+func (p GroupNetPolicy) TargetScope() TargetSelector {
+	if p.Scope != nil {
+		return TargetSelector{
+			Nodes:   append([]string(nil), p.Scope.Nodes...),
+			Groups:  append([]string(nil), p.Scope.Groups...),
+			All:     p.Scope.All,
+			Exclude: append([]string(nil), p.Scope.Exclude...),
+		}
+	}
+	if p.ScopeGroupID != "" {
+		return TargetSelector{Groups: []string{p.ScopeGroupID}}
+	}
+	return TargetSelector{}
 }
 
 // GroupNetRule mirrors NetRule but its Remote may additionally be a group ref

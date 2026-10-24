@@ -75,6 +75,11 @@ const (
 	// the target resolved to (MonitorDestinationRefused), or a check with
 	// secret headers asked for a request its rules forbid.
 	PathReasonDestinationRefused = "destination_refused"
+	// PathReasonPacketBudget: the control plane paused a check
+	// definition's path because its source would send the target address
+	// more than MonitorPacketsPerSecondMax packets a second across its
+	// checks (design 32 D1). It resumes once the budget has room.
+	PathReasonPacketBudget = "packet_budget"
 )
 
 // Monitor history retention.

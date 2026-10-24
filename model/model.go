@@ -1545,6 +1545,10 @@ const (
 	// the object again, names what changed, and lets the operator keep their
 	// draft by saving it over the new version (design 32 R6).
 	APIErrorVersionConflict = "version_conflict"
+	// APIErrorPathSetMigrated answers a write to the path set once it is
+	// migrated into check definitions (design 32 R1); the message names
+	// the definitions to edit instead.
+	APIErrorPathSetMigrated = "path_set_migrated"
 )
 
 type KVEntry struct {

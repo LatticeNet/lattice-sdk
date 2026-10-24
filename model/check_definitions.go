@@ -42,6 +42,12 @@ const (
 	// CheckDefinitionPairsMax bounds the paths one definition measures:
 	// its resolved sources times its targets.
 	CheckDefinitionPairsMax = 4096
+	// CheckDefinitionsMax bounds how many definitions the control plane
+	// keeps.
+	CheckDefinitionsMax = 256
+	// CheckDefinitionPausedMax bounds the paused targets a save may leave a
+	// definition holding; past it, forget some first.
+	CheckDefinitionPausedMax = 256
 )
 
 // CheckDefinitionSpec is what an operator writes: everything but the
@@ -205,15 +211,18 @@ type CheckDefinitionList struct {
 // PathReasonSourcePaused when the definition is disabled), and Measured
 // counts the pairs without one. Notes says why a node a selector names
 // explicitly is left out (LatencySourceUnknownNode,
-// LatencySourceDisabled).
+// LatencySourceDisabled). AlsoChanges names the other definitions whose
+// monitors the save would rewrite too: the packet budget is shared, so an
+// edit can pause or resume another definition's pairs.
 type CheckDefinitionPreview struct {
-	Sources  []string             `json:"sources"`
-	Targets  []CheckPreviewTarget `json:"targets"`
-	Pairs    []CheckPreviewPair   `json:"pairs"`
-	Paths    int                  `json:"paths"`
-	Measured int                  `json:"measured"`
-	Writes   CheckPreviewWrites   `json:"writes"`
-	Notes    map[string]string    `json:"notes,omitempty"`
+	Sources     []string             `json:"sources"`
+	Targets     []CheckPreviewTarget `json:"targets"`
+	Pairs       []CheckPreviewPair   `json:"pairs"`
+	Paths       int                  `json:"paths"`
+	Measured    int                  `json:"measured"`
+	Writes      CheckPreviewWrites   `json:"writes"`
+	Notes       map[string]string    `json:"notes,omitempty"`
+	AlsoChanges []string             `json:"also_changes,omitempty"`
 }
 
 // CheckPreviewTarget is one target of a dry run. Target is what the method

@@ -63,7 +63,7 @@ var legacyProbeMethods = []string{MonitorTypeHTTP, MonitorTypeTCP}
 // KnownProbeMethod reports whether kind is one an agent may report.
 func KnownProbeMethod(kind string) bool {
 	switch kind {
-	case MonitorTypeTCP, MonitorTypeHTTP, MonitorTypeICMP, MonitorTypeBeacon:
+	case MonitorTypeTCP, MonitorTypeHTTP, MonitorTypeICMP, MonitorTypeBeacon, MonitorTypeDNS:
 		return true
 	}
 	return false

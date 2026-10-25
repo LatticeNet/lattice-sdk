@@ -163,6 +163,12 @@ func TestProbeMethods(t *testing.T) {
 	if ProbeMethodSupported([]string{"tcp", "icmp"}, MonitorTypeHTTP) {
 		t.Fatal("a report is taken as the whole list")
 	}
+	if got := NormalizeProbeMethods([]string{"dns", "tcp"}); !slices.Equal(got, []string{"dns", "tcp"}) {
+		t.Fatalf("an agent's dns report was dropped: %v", got)
+	}
+	if ProbeMethodSupported(nil, MonitorTypeDNS) || ProbeMethodSupported([]string{"tcp", "http", "icmp", "beacon"}, MonitorTypeDNS) {
+		t.Fatal("an agent that does not report dns must not be handed a dns check")
+	}
 	if MonitorPackets(Monitor{}) != MonitorPacketsDefault || MonitorPackets(Monitor{Packets: 3}) != 3 {
 		t.Fatal("packets default")
 	}

@@ -204,6 +204,31 @@ message DNSDeploymentView {
   repeated DNSListener listeners = 28;
   TimePoint cert_not_after = 29;
   DNSDrift drift = 30;
+  repeated string allowed_clients = 31;
+  repeated DNSCertCheck cert_checks = 32;
+  DNSCertExpiry cert_expiry = 33;
+}
+
+// DNSCertCheck is one tls check linked to an external engine (design 32
+// S5c), listed when the caller may read it. cert_not_after and measured_at
+// come from its newest result that completed a handshake, and are absent
+// before one has.
+message DNSCertCheck {
+  string monitor_id = 1;
+  string name = 2;
+  string target = 3;
+  uint32 threshold_days = 4;
+  bool enabled = 5;
+  TimePoint cert_not_after = 6;
+  TimePoint measured_at = 7;
+}
+
+// DNSCertExpiry is the expiry an external engine's sheet shows: the soonest
+// one its linked checks measured, else the date the operator typed.
+message DNSCertExpiry {
+  TimePoint not_after = 1;
+  string source = 2; // measured | typed
+  string monitor_id = 3;
 }
 
 message NetEndpoint {

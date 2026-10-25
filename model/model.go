@@ -580,6 +580,9 @@ const (
 	DNSStatusDisabled = "disabled"
 	// DNSStatusObserved is the only status an external engine ever holds.
 	DNSStatusObserved = "observed"
+
+	// DNSAllowedClientsMax bounds DNSDeployment.AllowedClients.
+	DNSAllowedClientsMax = 64
 )
 
 // DNSZone is one served block in a self-hosted resolver configuration. It is
@@ -629,11 +632,25 @@ type DNSDeployment struct {
 	// CertNotAfter is the operator-entered expiry of the external engine's
 	// TLS certificate (DoT/DoH). Zero when unknown or not applicable.
 	CertNotAfter time.Time `json:"cert_not_after,omitzero"`
+	// CertMonitorIDs are the tls checks that measure the external engine's
+	// certificate, created or linked by "Measure this certificate" (design
+	// 32 S5c). They are ordinary operator checks; this list is the link, and
+	// the control plane owns it: a save keeps the stored list whatever the
+	// request carries. An id whose check was deleted is skipped on read.
+	CertMonitorIDs []string `json:"cert_monitor_ids,omitempty"`
 
 	ListenPort int    `json:"listen_port"`
 	EnableUDP  bool   `json:"enable_udp"`
 	EnableTCP  bool   `json:"enable_tcp"`
 	Exposure   string `json:"exposure"`
+	// AllowedClients are the client networks a CoreDNS deployment answers
+	// (design 32 S5b): at most DNSAllowedClientsMax CIDRs, IPv4 or IPv6, with
+	// no host bits set. They render as the acl plugin in every server block,
+	// one allow per network and then a block that answers REFUSED. They limit
+	// who gets answers, not who reaches the port. Empty answers every client
+	// that reaches it, and a public deployment with a forward zone needs at
+	// least one. An external engine takes none.
+	AllowedClients []string `json:"allowed_clients,omitempty"`
 
 	Zones []DNSZone `json:"zones"`
 

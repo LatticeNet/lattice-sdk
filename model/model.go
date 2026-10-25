@@ -1814,8 +1814,8 @@ const (
 )
 
 // Monitor is a periodic reachability/latency probe executed by assigned agents.
-// Target is host:port for tcp, an IPv4 literal for icmp and an http or https
-// URL for http. A monitor runs on every node when AssignAll is set, otherwise
+// Target is host:port for tcp, an IPv4 literal for icmp, an http or https
+// URL for http and a resolver endpoint (ParseDNSResolver) for dns. A monitor runs on every node when AssignAll is set, otherwise
 // on the nodes in NodeIDs. Design 29 M2a fields (TargetNode, Packets,
 // ExpectStatus, Headers, SecretsOrigin) are omitted until set, so an agent
 // that predates them decodes the monitor it always did.
@@ -1892,6 +1892,18 @@ type Monitor struct {
 	// reads as every default. A tls check takes none. Generated checks
 	// carry none of their own and read LatencyProbeConfig.Degraded.
 	Degraded *MonitorDegradedRule `json:"degraded,omitempty"`
+	// DNSName, DNSType, DNSExpect and DNSExpectRcode are a dns check's
+	// question and judgement (design 32 S5a, model/monitor_dns.go): the
+	// name asked (NormalizeDNSName), the type (a DNSTypes value; empty
+	// reads as A), the values every one of which must be in the answer
+	// (CanonicalDNSValue, at most MonitorDNSExpectMax; none means any
+	// answer of the type passes), and the expected response code (empty
+	// for NOERROR, or DNSRcodeNXDomain for a name that must not resolve,
+	// which takes no expected values). Other kinds leave them empty.
+	DNSName        string   `json:"dns_name,omitempty"`
+	DNSType        string   `json:"dns_type,omitempty"`
+	DNSExpect      []string `json:"dns_expect,omitempty"`
+	DNSExpectRcode string   `json:"dns_expect_rcode,omitempty"`
 	// Version counts edits. An edit names the version it was made from, so
 	// two operators editing one monitor cannot overwrite each other. A
 	// monitor created before edits existed reads as version zero.
@@ -1964,30 +1976,36 @@ const (
 // secret values) can neither wipe nor leak a secret. Absent or empty leaves
 // the headers as they are.
 type MonitorUpdate struct {
-	ID            string               `json:"id"`
-	Version       int64                `json:"version"`
-	Name          *string              `json:"name,omitempty"`
-	Type          *string              `json:"type,omitempty"`
-	Target        *string              `json:"target,omitempty"`
-	TargetNode    *string              `json:"target_node,omitempty"`
-	IntervalSec   *int                 `json:"interval_sec,omitempty"`
-	TimeoutSec    *int                 `json:"timeout_sec,omitempty"`
-	ThresholdDays *int                 `json:"threshold_days,omitempty"`
-	Packets       *int                 `json:"packets,omitempty"`
-	ExpectStatus  *string              `json:"expect_status,omitempty"`
-	Headers       []MonitorHeaderEdit  `json:"headers,omitempty"`
-	Alert         *string              `json:"alert,omitempty"`
-	AlertAfter    *int                 `json:"alert_after,omitempty"`
-	Degraded      *MonitorDegradedRule `json:"degraded,omitempty"`
-	Enabled       *bool                `json:"enabled,omitempty"`
-	AssignAll     *bool                `json:"assign_all,omitempty"`
-	NodeIDs       *[]string            `json:"node_ids,omitempty"`
-	PausedNodeIDs *[]string            `json:"paused_node_ids,omitempty"`
+	ID            string              `json:"id"`
+	Version       int64               `json:"version"`
+	Name          *string             `json:"name,omitempty"`
+	Type          *string             `json:"type,omitempty"`
+	Target        *string             `json:"target,omitempty"`
+	TargetNode    *string             `json:"target_node,omitempty"`
+	IntervalSec   *int                `json:"interval_sec,omitempty"`
+	TimeoutSec    *int                `json:"timeout_sec,omitempty"`
+	ThresholdDays *int                `json:"threshold_days,omitempty"`
+	Packets       *int                `json:"packets,omitempty"`
+	ExpectStatus  *string             `json:"expect_status,omitempty"`
+	Headers       []MonitorHeaderEdit `json:"headers,omitempty"`
+	// The dns question and judgement; DNSExpect replaces the stored values
+	// whole when present, so an empty list clears them.
+	DNSName        *string              `json:"dns_name,omitempty"`
+	DNSType        *string              `json:"dns_type,omitempty"`
+	DNSExpect      *[]string            `json:"dns_expect,omitempty"`
+	DNSExpectRcode *string              `json:"dns_expect_rcode,omitempty"`
+	Alert          *string              `json:"alert,omitempty"`
+	AlertAfter     *int                 `json:"alert_after,omitempty"`
+	Degraded       *MonitorDegradedRule `json:"degraded,omitempty"`
+	Enabled        *bool                `json:"enabled,omitempty"`
+	AssignAll      *bool                `json:"assign_all,omitempty"`
+	NodeIDs        *[]string            `json:"node_ids,omitempty"`
+	PausedNodeIDs  *[]string            `json:"paused_node_ids,omitempty"`
 }
 
 // MonitorResult is a single probe outcome. Agents report them for tcp, http,
-// icmp and beacon monitors; the server records its own for tls monitors, with
-// NodeID empty.
+// icmp, beacon and dns monitors; the server records its own for tls
+// monitors, with NodeID empty.
 //
 // A multi-packet run (icmp and beacon) reports Sent and Lost and the RTT of
 // every reply that came back, in send order, at most MonitorPacketsMax;
@@ -2006,15 +2024,25 @@ type MonitorResult struct {
 	Success   bool      `json:"success"`
 	LatencyMs float64   `json:"latency_ms"`
 	Error     string    `json:"error,omitempty"`
-	// CertNotAfter is the leaf certificate expiry a tls probe read, set
-	// whenever the handshake completed, whether or not the probe passed.
-	// It is absent from the wire otherwise (omitzero: omitempty never
-	// omits a struct, so a tcp result used to carry year 1).
+	// CertNotAfter is the leaf certificate expiry a tls probe, or a dns
+	// probe over DoH or DoT, read, set whenever the handshake completed,
+	// whether or not the probe passed. It is absent from the wire otherwise
+	// (omitzero: omitempty never omits a struct, so a tcp result used to
+	// carry year 1).
 	CertNotAfter time.Time `json:"cert_not_after,omitzero"`
 	Sent         int       `json:"sent,omitempty"`
 	Lost         int       `json:"lost,omitempty"`
 	RTTsMs       []float64 `json:"rtts_ms,omitempty"`
 	Reason       string    `json:"reason,omitempty"`
+	// DNSRcode and DNSAnswers are what a dns run got back, so a failing
+	// check shows it: the response code's mnemonic (NOERROR, SERVFAIL, or
+	// RCODE<n> for a code without one) and the answers of the asked type
+	// in canonical form (CanonicalDNSValue), at most MonitorDNSAnswersMax
+	// of at most MonitorDNSValueMax bytes each. A run that got no response
+	// leaves both empty. A failed run's Error starts with a DNSFailure*
+	// code.
+	DNSRcode   string   `json:"dns_rcode,omitempty"`
+	DNSAnswers []string `json:"dns_answers,omitempty"`
 }
 
 // LogSource declares a file on a node whose appended lines are tailed by the

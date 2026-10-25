@@ -74,13 +74,14 @@ const (
 // CheckDefinitionSpec is what an operator writes: everything but the
 // identity, the request headers and the bookkeeping.
 //
-// Type is the method, a MonitorType* value: tcp, icmp, beacon, http or tls,
-// or CheckMethodAuto. Sources selects the nodes that run it; a tls check runs
-// on the control plane and takes no sources. Targets selects target nodes
-// for tcp, icmp, beacon and auto. Addresses are external targets, each its
-// own target: absolute URLs for http, host:port for tcp and tls, IPv4
-// addresses for icmp. A tcp or icmp definition may name both; beacon and
-// auto take nodes only, http and tls addresses only.
+// Type is the method, a MonitorType* value: tcp, icmp, beacon, http, tls or
+// dns, or CheckMethodAuto. Sources selects the nodes that run it; a tls
+// check runs on the control plane and takes no sources. Targets selects
+// target nodes for tcp, icmp, beacon and auto. Addresses are external
+// targets, each its own target: absolute URLs for http, host:port for tcp
+// and tls, IPv4 addresses for icmp, resolver endpoints (ParseDNSResolver)
+// for dns. A tcp or icmp definition may name both; beacon and auto take
+// nodes only, http, tls and dns addresses only.
 //
 // ExcludedPairs are source to target node pairs the definition never
 // measures although both ends are in its sets ("Stop measuring this pair"),
@@ -107,6 +108,11 @@ type CheckDefinitionSpec struct {
 	Degraded      *MonitorDegradedRule `json:"degraded,omitempty"`
 	Enabled       bool                 `json:"enabled"`
 	ExcludedPairs []LatencyPair        `json:"excluded_pairs,omitempty"`
+	// The dns question and judgement, as on a Monitor.
+	DNSName        string   `json:"dns_name,omitempty"`
+	DNSType        string   `json:"dns_type,omitempty"`
+	DNSExpect      []string `json:"dns_expect,omitempty"`
+	DNSExpectRcode string   `json:"dns_expect_rcode,omitempty"`
 }
 
 // CheckDefinition is a stored definition.
